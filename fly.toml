@@ -19,13 +19,14 @@ primary_region = 'fra'
 [env]
   PORT = '8080'
 
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
+# Removed [http_service] section as this is a background worker, not a web service
+# [http_service]
+#   internal_port = 8080
+#   force_https = true
+#   auto_stop_machines = 'stop'
+#   auto_start_machines = true
+#   min_machines_running = 0
+#   processes = ['app']
 
 [[vm]]
   size = 'shared-cpu-1x'
