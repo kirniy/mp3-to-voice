@@ -1,0 +1,3 @@
+python-telegram-bot==21.4
+pydub
+ffmpeg-python # Optional, but recommended for broader format support 
