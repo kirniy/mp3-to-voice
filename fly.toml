@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for mp3tovoice-bot on 2025-04-03T13:15:56+04:00
+# fly.toml app configuration file generated for mp3tovoice-bot on 2025-04-03T09:09:53Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -6,10 +6,15 @@
 app = 'mp3tovoice-bot'
 primary_region = 'fra'
 
-[build]
-  builder = 'paketobuildpacks/builder:base'
-  [build.args]
-    BP_Apt_Packages = "ffmpeg"
+# Build configuration is now handled by Dockerfile
+# [build]
+#   builder = 'paketobuildpacks/builder:base'
+#   [build.args]
+#     BP_Apt_Packages = "ffmpeg"
+
+# Process definition is now handled by Dockerfile CMD
+# [processes]
+#   app = "python3 bot.py"
 
 [env]
   PORT = '8080'
@@ -27,7 +32,3 @@ primary_region = 'fra'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 256
-
-# Define the main process to run the bot script
-[processes]
-  app = "python3 bot.py"
