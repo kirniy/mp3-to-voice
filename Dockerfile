@@ -19,6 +19,6 @@ COPY . .
 # Make port 8080 available to the world outside this container (Fly needs *something* exposed, even if we don't use it)
 EXPOSE 8080
 
-# Run bot.py when the container launches - Changed for debugging
-# CMD ["python3", "bot.py"]
-CMD printenv && sleep infinity 
+# Run bot.py when the container launches
+CMD ["python3", "bot.py"]
+# CMD printenv && sleep infinity 
