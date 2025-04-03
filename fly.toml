@@ -27,3 +27,7 @@ primary_region = 'fra'
   cpu_kind = 'shared'
   cpus = 1
   memory_mb = 256
+
+# Define the main process to run the bot script
+[processes]
+  app = "python3 bot.py"
