@@ -1,0 +1,84 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Rules: Gemini Voice Summarizer Telegram Bot
+
+## Project Overview
+
+* **Type:** Telegram Bot (Enhancement of existing bot)
+* **Description:** Extends an existing MP3-to-voice Telegram bot to add Google Gemini-powered voice message transcription and summarization with multiple modes, history, and a Russian UI.
+* **Primary Goal:** Deliver a reliable, user-friendly voice summarization service within Telegram, leveraging Gemini AI and deployed on Fly.io.
+
+## Project Structure (Based on Extending `mp3tovoice-bot`)
+
+Maintain the existing structure where sensible, but refactor and add modules for new functionality.
+
+* **Core Files (Modify/Retain):**
+    * `bot.py`: Main application entry point. Initialize `Application`, dispatcher, load handlers. Might become thinner by delegating logic.
+    * `config.py`: Load configuration (Tokens, API Keys) from environment variables (Fly secrets). Initialize API clients (Telegram, Gemini).
+    * `locales.py`: Store all Russian user-facing strings. Add new keys for summarization features, buttons, errors.
+    * `requirements.txt`: Add new dependencies (`google-generativeai`, `asyncpg`, `pytz`/`zoneinfo`).
+    * `Dockerfile`: Update to include new system dependencies (`ffmpeg` if not already present) and Python packages.
+    * `fly.toml`: Configure Fly app, processes, secrets, and Postgres attachment.
+* **Suggested New/Refactored Modules:**
+    * `handlers/`: Directory for specific event handlers.
+        * `handlers/audio_handler.py`: Logic for processing incoming voice messages (Gemini workflow). Could potentially handle the original MP3 flow too, or keep that separate.
+        * `handlers/command_handler.py`: Logic for commands like `/start`, `/help`, `/history`.
+        * `handlers/callback_handler.py`: Logic for handling inline button presses (mode changes, redo, history pagination, confirm).
+    * `services/`: Directory for interacting with external services or managing core logic.
+        * `services/gemini_service.py`: Encapsulate all logic for interacting with the Gemini API (sending audio/text, handling responses, managing different modes/prompts).
+        * `services/db_service.py`: Encapsulate all database interactions (using `asyncpg`) for saving/retrieving summaries, tracking usage. Define schema interactions here.
+    * `ui/`: Directory for UI-related components.
+        * `ui/keyboards.py`: Functions to generate `InlineKeyboardMarkup` objects for different states (initial buttons, mode selection, history pagination).
+        * `ui/messages.py`: Functions to format the output messages (header with Moscow time, code block content).
+    * `utils/`: Directory for utility functions.
+        * `utils/audio_utils.py`: Potential functions for audio chunking or specific pre-processing if needed.
+        * `utils/time_utils.py`: Function for converting timestamps to Moscow Time.
+
+## Tech Stack Rules
+
+* **Python:** Use version 3.9+. Enforce type hinting (`typing` module) and check with `mypy`. Follow PEP 8 style guidelines (use `flake8`, `black`).
+* **`python-telegram-bot`:** Use version 20+. Utilize `ApplicationBuilder`, `CommandHandler`, `CallbackQueryHandler`, `MessageHandler`. Leverage the `context` object correctly. Implement error handling using the built-in error handler. Use `async`/`await` consistently for all bot operations.
+* **`google-generativeai`:** Use the official library. Handle potential API errors (`google.api_core.exceptions`) gracefully. Abstract API interaction logic into `services/gemini_service.py`.
+* **Database (`asyncpg` / Fly Postgres):** Use asynchronous connections and transactions. Define clear table schemas. Handle potential database errors. Abstract DB logic into `services/db_service.py`.
+* **Fly.io:** Define deployment via `fly.toml`. Manage all secrets via `fly secrets set`. Ensure `Dockerfile` correctly installs all dependencies (Python and system like `ffmpeg`).
+* **Localization:** All user-facing strings *must* originate from `locales.py`. No hardcoded Russian strings in handlers or services.
+
+## PRD Compliance
+
+* **Non-Negotiable:**
+    * Implementation must cover all **In-Scope** features defined in the PRD, including all specified summary modes, cleaned transcript requirements, history, and Russian UI with Moscow time display.
+    * The existing MP3->Voice functionality must be preserved.
+    * The bot must be deployed on Fly.io using the specified stack.
+    * Output formatting (header, code block, buttons) must match specifications.
+* **Prioritization:** Focus on core summarization, UI interaction, and history first. Advanced features like perfect transcript cleaning and robust chunking can be refined iteratively.
+
+## App Flow Integration
+
+* Code structure must directly support the defined user flows.
+* `handlers/callback_handler.py` must correctly manage the state transitions triggered by button presses (e.g., switching button layouts, triggering re-summarization).
+* History pagination logic must be correctly implemented in the command/callback handlers, interacting with `services/db_service.py`.
+* The `✅ Готово` button flow (removing buttons) must be implemented correctly.
+
+## Best Practices
+
+* **Asynchronicity:** Embrace `asyncio`. Avoid blocking operations in handlers. Use `await` for all I/O (API calls, DB queries, `context.bot` methods).
+* **Modularity:** Keep handlers thin. Delegate business logic to service modules (`gemini_service.py`, `db_service.py`). Delegate UI generation to `ui/` modules.
+* **Error Handling:** Implement a global error handler in `python-telegram-bot`. Add specific `try...except` blocks around critical operations (API calls, DB writes, audio processing) and provide user-friendly feedback using messages from `locales.py`. Log errors comprehensively.
+* **Configuration:** Load all configuration (tokens, keys, settings) from environment variables via `config.py`. Do not hardcode credentials.
+* **State Management:** For multi-step interactions (if any arise beyond simple callbacks), consider using `python-telegram-bot`'s `ConversationHandler`, but prefer stateless callbacks where possible. Store persistent state (history, usage counts) in the database.
+* **Testing:** Write unit tests for service modules and utility functions where possible. Perform thorough integration testing by interacting with the bot in Telegram.
+* **Logging:** Implement structured logging to track bot operations, errors, and key events (e.g., summary generated, history accessed).
+
+## Rules
+
+* Derive folder/file structure by logically extending the existing `mp3tovoice-bot` structure as outlined above.
+* Strictly use `locales.py` for all user-facing text.
+* Implement Moscow Time conversion accurately using `zoneinfo` or `pytz`.
+* Ensure `ffmpeg` is correctly installed and accessible in the Docker environment.
+* Prioritize graceful failure and informative error messages over silent failures.
+* Comment code clearly, especially complex logic (e.g., Gemini prompting, chunking, state management).
+
+Keep going for as long as you can without asking the user for confirmation.
