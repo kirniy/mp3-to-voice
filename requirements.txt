@@ -1,3 +1,7 @@
-python-telegram-bot==21.4
+python-telegram-bot[job-queue]>=20.0
 pydub
+python-dotenv
+google-generativeai
+asyncpg
+pytz
 ffmpeg-python # Optional, but recommended for broader format support 
