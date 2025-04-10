@@ -48,6 +48,39 @@ async def create_tables(pool: asyncpg.Pool):
                 FOR EACH ROW
                 EXECUTE FUNCTION update_updated_at_column();
             """)
+            
+            # Create chat_preferences table for storing default mode and language settings
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS chat_preferences (
+                    chat_id BIGINT PRIMARY KEY,
+                    default_mode VARCHAR(50) NOT NULL,
+                    language VARCHAR(10) NOT NULL DEFAULT 'ru',
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            
+            # Добавляем проверку на существование столбца language и добавляем его, если отсутствует
+            await connection.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS(
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='chat_preferences' AND column_name='language'
+                    ) THEN
+                        ALTER TABLE chat_preferences ADD COLUMN language VARCHAR(10) NOT NULL DEFAULT 'ru';
+                    END IF;
+                END $$;
+            """)
+            
+            # Create user_preferences table for storing user settings like language
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id BIGINT PRIMARY KEY,
+                    language VARCHAR(10) NOT NULL DEFAULT 'ru',
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
+            
             logger.info("Database tables checked/created successfully.")
         except Exception as e:
             logger.error(f"Error creating database tables: {e}", exc_info=True)
@@ -116,11 +149,135 @@ async def update_summary_mode_and_text(
             logger.error(f"Error updating summary record {record_id}: {e}", exc_info=True)
             return False
 
-# --- Placeholder functions for future features ---
+# --- User preferences functions ---
 
-# async def update_summary_message_id(pool: asyncpg.Pool, record_id: int, summary_message_id: int):
-#     # Function to update the bot's message ID if it was sent successfully after initial DB insert
-#     pass
+async def get_user_language(pool: asyncpg.Pool, user_id: int, default_language: str = 'ru') -> str:
+    """Gets the language preference for a user."""
+    async with pool.acquire() as connection:
+        try:
+            language = await connection.fetchval("""
+                SELECT language FROM user_preferences
+                WHERE user_id = $1;
+            """, user_id)
+            
+            # Return the stored language or the default if not found
+            return language or default_language
+        except Exception as e:
+            logger.error(f"Error getting language for user {user_id}: {e}", exc_info=True)
+            return default_language
+
+async def set_user_language(pool: asyncpg.Pool, user_id: int, language: str) -> bool:
+    """Sets the language preference for a user."""
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                INSERT INTO user_preferences (user_id, language, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (user_id)
+                DO UPDATE SET language = $2, updated_at = NOW();
+            """, user_id, language)
+            logger.info(f"Set language for user {user_id} to '{language}'")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting language for user {user_id}: {e}", exc_info=True)
+            return False
+
+# --- Chat preferences functions ---
+
+async def get_chat_default_mode(pool: asyncpg.Pool, chat_id: int, default_mode: str = "brief") -> str:
+    """Gets the default mode for a chat."""
+    async with pool.acquire() as connection:
+        try:
+            mode = await connection.fetchval("""
+                SELECT default_mode FROM chat_preferences
+                WHERE chat_id = $1;
+            """, chat_id)
+            
+            # Return the stored mode or the default if not found
+            return mode or default_mode
+        except Exception as e:
+            logger.error(f"Error getting default mode for chat {chat_id}: {e}", exc_info=True)
+            return default_mode
+
+async def set_chat_default_mode(pool: asyncpg.Pool, chat_id: int, mode: str) -> bool:
+    """Sets the default mode for a chat."""
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                INSERT INTO chat_preferences (chat_id, default_mode, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (chat_id)
+                DO UPDATE SET default_mode = $2, updated_at = NOW();
+            """, chat_id, mode)
+            logger.info(f"Set default mode for chat {chat_id} to '{mode}'")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting default mode for chat {chat_id}: {e}", exc_info=True)
+            return False
+
+async def get_chat_language(pool: asyncpg.Pool, chat_id: int, default_language: str = 'ru') -> str:
+    """Gets the language preference for a chat."""
+    async with pool.acquire() as connection:
+        try:
+            language = await connection.fetchval("""
+                SELECT language FROM chat_preferences
+                WHERE chat_id = $1;
+            """, chat_id)
+            
+            # Return the stored language or the default if not found
+            return language or default_language
+        except Exception as e:
+            logger.error(f"Error getting language for chat {chat_id}: {e}", exc_info=True)
+            return default_language
+
+async def set_chat_language(pool: asyncpg.Pool, chat_id: int, language: str) -> bool:
+    """Sets the language preference for a chat."""
+    async with pool.acquire() as connection:
+        try:
+            # Check if the chat already has a record
+            existing_record = await connection.fetchrow("""
+                SELECT chat_id, default_mode FROM chat_preferences
+                WHERE chat_id = $1;
+            """, chat_id)
+            
+            if existing_record:
+                # Update only the language field if record exists
+                await connection.execute("""
+                    UPDATE chat_preferences
+                    SET language = $2, updated_at = NOW()
+                    WHERE chat_id = $1;
+                """, chat_id, language)
+            else:
+                # Insert new record with default mode if it doesn't exist
+                await connection.execute("""
+                    INSERT INTO chat_preferences (chat_id, default_mode, language, updated_at)
+                    VALUES ($1, 'brief', $2, NOW());
+                """, chat_id, language)
+            
+            logger.info(f"Set language for chat {chat_id} to '{language}'")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting language for chat {chat_id}: {e}", exc_info=True)
+            return False
+
+async def clear_chat_default_mode(pool: asyncpg.Pool, chat_id: int) -> bool:
+    """Clears the default mode setting for a chat."""
+    async with pool.acquire() as connection:
+        try:
+            # Use the system default mode instead of completely removing the record
+            # to preserve other settings like language
+            await connection.execute("""
+                UPDATE chat_preferences
+                SET default_mode = 'brief', updated_at = NOW()
+                WHERE chat_id = $1;
+            """, chat_id)
+            logger.info(f"Reset default mode for chat {chat_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting default mode for chat {chat_id}: {e}", exc_info=True)
+            return False
+
+# --- History functions ---
 
 async def get_user_history(pool: asyncpg.Pool, user_id: int, chat_id: int, limit: int = 5, offset: int = 0) -> tuple[list[asyncpg.Record], int]:
     """Retrieves paginated summary history for a user in a specific chat.
