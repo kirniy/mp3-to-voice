@@ -1,0 +1,272 @@
+{
+  "currentVersion": "v0.1",
+  "status": "stable",
+  "lastUpdated": "2025-04-10",
+  "stages": [
+    {
+      "id": 1,
+      "title": "Foundational Stability & Efficiency",
+      "version": "v0.2",
+      "description": "Enhance bot reliability, performance, and reduce operational costs before adding major features.",
+      "status": "in progress",
+      "progressPercent": 75,
+      "tasks": [
+        {
+          "id": "1.1",
+          "title": "Enhance Error Handling",
+          "description": "Implement comprehensive and specific error handling across bot.py (message handlers, callbacks) and gemini_utils.py, including retries with backoff for API calls.",
+          "details": "Catch specific exceptions from python-telegram-bot (e.g., telegram.error.BadRequest, telegram.error.RetryAfter), asyncpg (e.g., asyncpg.PostgresError), and the google-generativeai library. Implement robust retry logic with exponential backoff and jitter for transient network or API errors.",
+          "status": "completed",
+          "technical": "try...except, exponential backoff, google.api_core.exceptions",
+          "laymanExplanation": "The bot will learn to properly respond to errors and won't 'crash' when problems occur. Like a good employee who knows what to do in unexpected situations — this will make the bot more reliable for users."
+        },
+        {
+          "id": "1.2",
+          "title": "Improve Resource Management",
+          "description": "Ensure robust tempfile cleanup and Gemini file deletion using try...finally.",
+          "details": "Ensure temporary audio files created using tempfile are always deleted using try...finally blocks to prevent disk space leaks, especially if errors occur during processing. Strengthen the Gemini file cleanup logic in gemini_utils.py to ensure genai.delete_file is called reliably in a finally block after processing or failure.",
+          "status": "completed",
+          "technical": "try...finally, tempfile.NamedTemporaryFile, genai.delete_file",
+          "laymanExplanation": "Cleaning up temporary files to avoid cluttering the server. Imagine the bot cleaning up 'trash' after work — this saves space and server resources."
+        },
+        {
+          "id": "1.3",
+          "title": "Address State Consistency",
+          "description": "Remove the in-memory language cache from locales.py and rely solely on db_utils.py.",
+          "details": "Eliminate the in-memory user_language dictionary and related functions (set_user_language, get_user_language) in locales.py. Rely solely on the database functions in db_utils.py for language preferences to ensure consistency, especially when scaling horizontally.",
+          "status": "in progress",
+          "technical": "db_utils.py, get_user_language(), set_user_language()",
+          "laymanExplanation": "Storing all language settings in only one place (database) without temporary copies. Like a single source of truth — this will prevent confusion when multiple copies of the bot are running simultaneously."
+        },
+        {
+          "id": "1.4",
+          "title": "Optimize Gemini API Usage",
+          "description": "Refactor gemini_utils.py to perform transcription and summarization in a single API call.",
+          "details": "Modify process_audio_with_gemini to generate both the transcript and the requested summary/mode output (brief, detailed, etc.) in a single model.generate_content_async call. This is the most significant optimization, potentially halving Gemini API costs and reducing latency per voice message.",
+          "status": "planned",
+          "technical": "model.generate_content_async, prompt engineering, response parsing",
+          "laymanExplanation": "The bot will do two tasks in one request: both transcribing audio and creating its summary. Like ordering a combo meal instead of separate dishes — this will halve the cost of processing each message."
+        },
+        {
+          "id": "1.5",
+          "title": "Refactor button_callback",
+          "description": "Break down the large function into smaller, maintainable helper functions.",
+          "details": "Break down the large button_callback function into smaller, focused async helper functions based on the callback data prefix (e.g., handle_mode_selection_callback, handle_history_nav_callback, handle_settings_callback). This improves readability and maintainability.",
+          "status": "planned",
+          "technical": "async helper functions, callback data prefix",
+          "laymanExplanation": "Dividing a large confusing function into several simple ones. Like breaking down a big task into understandable steps — this will make the code clearer and easier to modify."
+        },
+        {
+          "id": "1.6",
+          "title": "Optimize Database Interactions",
+          "description": "Implement selective column fetching and review connection management.",
+          "details": "In functions like get_summary_context_for_callback, fetch only the specific columns needed for the callback action instead of the entire record (SELECT id, user_id, ...). Use EXPLAIN ANALYZE in PostgreSQL to check the performance of key queries (especially history fetching) under load and ensure indices are effective.",
+          "status": "planned",
+          "technical": "SELECT specific columns, EXPLAIN ANALYZE, indices",
+          "laymanExplanation": "Optimizing database work to only request the data that's needed. Like taking only those ingredients from the refrigerator that are needed for a specific dish — this will speed up the bot's operation."
+        },
+        {
+          "id": "1.7",
+          "title": "Simplify Markdown Handling",
+          "description": "Evaluate replacing custom markdown functions with standard python-telegram-bot methods.",
+          "details": "Re-evaluate the custom markdown protection/escaping functions (protect_markdown, unprotect_markdown, format_for_telegram). Test if telegram.helpers.escape_markdown(text, version=2, entity_type=...) combined with Telegram's parse_mode=ParseMode.MARKDOWN_V2 can handle most formatting needs, reducing custom code complexity and potential bugs.",
+          "status": "pending decision",
+          "technical": "telegram.helpers.escape_markdown, ParseMode.MARKDOWN_V2",
+          "laymanExplanation": "Simplifying the way text is formatted in messages. Like switching from manual layout to a ready-made template — this will reduce the number of potential errors."
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Core Features - Subscription & Admin Access",
+      "version": "v0.3",
+      "description": "Introduce monetization and basic administrative oversight.",
+      "status": "planned",
+      "progressPercent": 10,
+      "tasks": [
+        {
+          "id": "2.1",
+          "title": "Implement Webhook Support",
+          "description": "Transition from polling to webhooks for better scalability.",
+          "details": "Requires adding a minimal web server (e.g., aiohttp, FastAPI) and updating fly.toml. This is generally more efficient for high-traffic bots and requires configuring the [http_service] section in fly.toml to route external traffic to the bot's web server port.",
+          "status": "planned",
+          "technical": "aiohttp, FastAPI, run_webhook, [http_service] in fly.toml",
+          "laymanExplanation": "Switching from constant 'calls' to Telegram to receiving notifications from them. Like instead of calling a friend every minute — asking them to write when there's news. This reduces load and makes the bot more responsive."
+        },
+        {
+          "id": "2.2",
+          "title": "Subscription System - Database Schema",
+          "description": "Design and implement database changes (subscriptions table, potentially linking users, tiers, start/end dates, chat limits, associated chat IDs).",
+          "details": "Create a new subscriptions table with fields for user_id, subscription_tier, start_date, end_date, chat_limit, and possibly an array of chat_ids to track which chats the bot is used in. Add appropriate indices and foreign keys for efficient queries.",
+          "status": "planned",
+          "technical": "CREATE TABLE subscriptions, ALTER TABLE users, foreign keys",
+          "laymanExplanation": "Creating a place in the database to store subscription information. Like organizing a card file of users with their statuses — this is the foundation for the paid version."
+        },
+        {
+          "id": "2.3",
+          "title": "Subscription System - Chat Tracking",
+          "description": "Implement logic in bot.py (and potentially db_utils.py) to track which chats a subscribed user has added the bot to.",
+          "details": "Add checks in message handlers to enforce the chat limits based on the user's subscription tier. Implement functions to add/remove tracked chats when the bot is added or removed, and a function to count how many chats a user is currently using.",
+          "status": "planned",
+          "technical": "chat_member_handler, db_utils.add_tracked_chat, count_user_chats",
+          "laymanExplanation": "Tracking which chats the bot is used in and checking limits. Like accounting for how many offices one employee serves — this will help control load and enforce subscription limitations."
+        },
+        {
+          "id": "2.4",
+          "title": "Subscription System - Payment Integration (YuKassa)",
+          "description": "Integrate with YuKassa via BotFather for handling payments.",
+          "details": "Set up payment tokens, handle payment callbacks/invoices, and update the user's subscription status in the database upon successful payment. Implement different subscription tiers with different prices and features, and auto-renewal if supported by YuKassa.",
+          "status": "planned",
+          "technical": "pre_checkout_query_handler, successful_payment_handler, YuKassa API",
+          "laymanExplanation": "Connecting to the YuKassa payment system to accept payments. Like installing a cash register in a store — this will allow automatically accepting payments and issuing subscriptions."
+        },
+        {
+          "id": "2.5",
+          "title": "Basic Admin Telegram Mini App (TMA)",
+          "description": "Set up the basic structure for a TMA. Implement admin authentication. Display basic user information and subscription status fetched from the database.",
+          "details": "Develop a simple web application integrated with Telegram for administrative functions. Use the Telegram WebApp API for authentication and display basic usage statistics, user subscription management, and error monitoring.",
+          "status": "planned",
+          "technical": "TMA, WebApp API, admin authentication",
+          "laymanExplanation": "Creating a mini-application for administrators to manage the bot. Like a control panel for a manager — this will allow monitoring the bot's work and users."
+        },
+        {
+          "id": "2.6",
+          "title": "Fly.io Scaling Preparation",
+          "description": "Configure horizontal scaling (fly scale count N), ensure continuous operation (min_machines_running), and add basic health checks in fly.toml.",
+          "details": "To handle hundreds of users, configure Fly.io to run multiple instances of the bot. The stateless nature (using the database for shared state) makes horizontal scaling feasible. Monitor CPU and Memory usage on the shared-cpu-1x VMs.",
+          "status": "planned",
+          "technical": "fly scale count, min_machines_running, [[services.tcp_checks]]",
+          "laymanExplanation": "Setting up the server to run multiple copies of the bot. Like cloning an employee to handle a large flow of clients — this will allow the bot to serve more users simultaneously."
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Feature Expansion & Growth",
+      "version": "v0.4",
+      "description": "Enhance user experience, add growth mechanisms, and improve monitoring.",
+      "status": "planned",
+      "progressPercent": 0,
+      "tasks": [
+        {
+          "id": "3.1",
+          "title": "Full Admin Dashboard Features",
+          "description": "Expand the Admin TMA to include detailed statistics: bot usage metrics, revenue tracking, user base overview, API/Fly.io cost estimations.",
+          "details": "Add advanced charts and visualizations for tracking user base growth, feature usage, and financial metrics. Implement filters for detailed data analysis and report exports.",
+          "status": "planned",
+          "technical": "Chart.js, user growth analytics, revenue tracking",
+          "laymanExplanation": "Expanding the administrator panel with detailed statistics and analytics. Like detailed business analytics for a manager — this will provide complete understanding of bot usage and revenue."
+        },
+        {
+          "id": "3.2",
+          "title": "Referral Program",
+          "description": "Implement the referral code generation, tracking, reward application logic, and necessary database changes.",
+          "details": "Mechanics: Generate unique, user-friendly codes. Handle incoming links/commands to associate users. Logic to validate referrals and apply rewards. Ensure rewards are applied only once per unique referral.",
+          "status": "planned",
+          "technical": "referral_code, referred_by_user_id, reward_applied_at",
+          "laymanExplanation": "Creating a 'refer-a-friend' recommendation system. Like a fitness club incentive program — this will attract new users and reward existing ones."
+        },
+        {
+          "id": "3.3",
+          "title": "Improved History Management",
+          "description": "Add features like keyword search, date filtering, and potentially individual entry deletion.",
+          "details": "Implement advanced searching of transcript/summary history, ensuring search accuracy even with different word forms or typos. Add a user interface for selecting date and time to filter history results.",
+          "status": "planned",
+          "technical": "full-text search, date filters, history entry deletion",
+          "laymanExplanation": "Adding search and filtering to the bot usage history. Like a search engine in email — this will make it easy to find old messages and manage history."
+        },
+        {
+          "id": "3.4",
+          "title": "Usage Tracking & Limiting",
+          "description": "Implement detailed tracking of API calls/processing time per user/chat, potentially for future tiered limiting or analytics.",
+          "details": "Tracker for counting Gemini API calls, total processing time, and resource usage by users and chats. Implement limitations based on subscription tier, warnings about approaching limits, and flexible parameters for adjusting limitations.",
+          "status": "planned",
+          "technical": "usage tracking table, API call counters, time tracking",
+          "laymanExplanation": "Tracking bot usage by each user and different limits for different plans. Like a minute counting system in mobile communication — this will allow creating different tariff plans."
+        },
+        {
+          "id": "3.5",
+          "title": "Error Monitoring Service Integration",
+          "description": "Integrate Sentry or a similar service for automated production error reporting.",
+          "details": "Set up Sentry to automatically collect, aggregate, and alert on exceptions in the production environment, making debugging easier. Set priorities and categorize errors for efficient tracking and fixing.",
+          "status": "planned",
+          "technical": "sentry-sdk, exception tracking, error prioritization",
+          "laymanExplanation": "Automatic tracking and reporting of bot errors. Like a health monitoring system — this will allow quickly learning about problems and fixing them."
+        },
+        {
+          "id": "3.6",
+          "title": "Optimize Gemini File Handling",
+          "description": "Implement caching of audio_file.uri to potentially reuse uploads for actions like 'Redo'.",
+          "details": "Investigate if Gemini offers streaming input or other mechanisms to avoid re-uploading the same audio for actions like 'Redo'. Cache the audio_file.uri returned by genai.upload_file in the summaries table; if the URI is still valid, you might reuse it for subsequent operations on the same audio.",
+          "status": "planned",
+          "technical": "audio_file.uri caching, genai.upload_file",
+          "laymanExplanation": "Optimizing work with uploaded audio files. Like reusing materials — this will save resources when reprocessing the same file."
+        },
+        {
+          "id": "3.7",
+          "title": "Transcript Caching",
+          "description": "Implement caching for transcripts when users switch modes for the same audio file.",
+          "details": "If a user requests different summary modes for the same voice message quickly, cache the initial transcript text (e.g., in the summaries table or a separate cache like Redis) to avoid redundant Gemini transcription calls when only the summarization prompt needs changing.",
+          "status": "planned",
+          "technical": "transcript caching, Redis, time-based invalidation",
+          "laymanExplanation": "Saving the audio transcription so it doesn't need to be redone when changing modes. Like saving a document draft — this will speed up work when requesting different types of summaries for the same audio."
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Continuous Improvement & Advanced Features",
+      "version": "v1.0+",
+      "description": "Ongoing refinement, optimization, and potential addition of advanced capabilities.",
+      "status": "planned",
+      "progressPercent": 0,
+      "tasks": [
+        {
+          "id": "4.1",
+          "title": "Enhanced Language Handling",
+          "description": "Implement language auto-detection and consider adopting standard localization libraries.",
+          "details": "Attempt to auto-detect the language of the voice message after transcription (potentially using a simple language detection library or another small AI call) to provide more accurate default summarization language. Consider using a standard localization library like GNU gettext or fluent-python if the number of strings/languages grows significantly.",
+          "status": "planned",
+          "technical": "language detection after transcription, gettext, fluent-python",
+          "laymanExplanation": "Automatic detection of voice message language. Like translating foreign speech — this will provide better understanding of message content in different languages."
+        },
+        {
+          "id": "4.2",
+          "title": "Database Performance Tuning",
+          "description": "Regularly analyze query performance (EXPLAIN ANALYZE) under load and optimize indices or queries as needed.",
+          "details": "Create a comprehensive set of indices for the most frequently used queries, especially those that filter or join data. Implement partitioning for tables that grow large over time (e.g., summaries or history) to maintain high performance.",
+          "status": "planned",
+          "technical": "EXPLAIN ANALYZE, index optimization, query performance",
+          "laymanExplanation": "Regular analysis and optimization of the database for growing volumes. Like preventive car maintenance — this will ensure stable operation even under heavy load."
+        },
+        {
+          "id": "4.3",
+          "title": "Fly.io Monitoring & Scaling",
+          "description": "Continuously monitor resource usage and adjust vertical/horizontal scaling as the user base grows. Refine health checks.",
+          "details": "Set up alerts for high CPU/memory usage. Implement auto-scaling if possible to handle traffic fluctuations. Track infrastructure expenses and optimize resource placement to minimize costs while maintaining performance.",
+          "status": "planned",
+          "technical": "resource monitoring, vertical/horizontal scaling, health checks",
+          "laymanExplanation": "Constant monitoring of server usage and automatic scaling. Like a smart thermostat regulating heating power — this will provide an optimal balance between performance and costs."
+        },
+        {
+          "id": "4.4",
+          "title": "Explore Advanced Caching",
+          "description": "Consider implementing more sophisticated caching for database queries if bottlenecks appear.",
+          "details": "For frequently accessed, rarely changing data like chat preferences (get_chat_default_mode, get_chat_language), consider implementing a short-lived, in-memory cache (e.g., using cachetools library with a Time-To-Live) that is explicitly invalidated when settings are updated via set_ functions.",
+          "status": "planned",
+          "technical": "cachetools, TTL caching, explicit invalidation",
+          "laymanExplanation": "Advanced caching of frequently requested information. Like remembering frequent customer orders — this will speed up the bot's work and reduce database load."
+        },
+        {
+          "id": "4.5",
+          "title": "A/B Testing & Feature Rollouts",
+          "description": "Implement mechanisms for testing new features or prompts with subsets of users.",
+          "details": "Create a system for dividing users into groups for A/B testing different prompts, output formats, or features without needing to fully deploy to all users. Include metrics to compare performance of different variants based on user interaction and feedback.",
+          "status": "planned",
+          "technical": "A/B testing framework, feature flags, user segmentation",
+          "laymanExplanation": "Testing new features on a portion of users before full launch. Like pre-sale product testing on a focus group — this will allow evaluating feature usefulness and improving them before the final release."
+        }
+      ]
+    }
+  ]
+}
