@@ -787,7 +787,7 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
                         "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
                         "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
                         "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-                        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+                        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['ru']), # Corrected: Get prompt based on language, default to Russian
                     }
                     summary_prompt = prompt_map.get(mode)
                     if not summary_prompt:

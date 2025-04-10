@@ -17,7 +17,7 @@ from telegram.helpers import escape_markdown as telegram_escape_markdown # Added
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
-from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status # Added get_user_history
+from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history # Added get_user_history
 from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
 
 # Enable logging
@@ -302,46 +302,53 @@ def format_history_message(record: asyncpg.Record, current_index: int, total_cou
     return f"{header}\n\n{escaped_text}"
 
 def create_history_pagination_buttons(original_msg_id: int, current_offset: int, total_count: int, page_size: int, language: str = 'ru') -> InlineKeyboardMarkup | None:
-    """Creates buttons for history pagination."""
+    """Creates buttons for history pagination, including delete and export."""
     if total_count <= 0:
-        return None
-    
+        # Still provide delete/export options even if history is empty
+        pass # Continue to create buttons
+
     # Since page_size is 1, current_offset is the index
     current_index = current_offset 
     
     buttons = []
-    row = []
+    nav_row = []
     
     # Previous page button (if not the first item)
     if current_index > 0:
         prev_offset = current_index - 1
         prev_label = "⬅️"
-        # if language == 'en': prev_label = "⬅️"
-        # elif language == 'kk': prev_label = "⬅️"
-        row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{original_msg_id}:{prev_offset}"))
+        nav_row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{original_msg_id}:{prev_offset}"))
     else:
-        row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
+        nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
-    # Center button to return to settings menu
+    # Center button to return to settings menu (localize label later if needed)
     back_to_settings_label = "⚙️ Настройки"
     if language == 'en':
         back_to_settings_label = "⚙️ Settings"
     elif language == 'kk':
         back_to_settings_label = "⚙️ Параметрлер"
-    # Corrected callback_data to "settings"
-    row.append(InlineKeyboardButton(back_to_settings_label, callback_data="settings")) 
+    # Ensure callback_data is just "settings", not dependent on msg_id
+    nav_row.append(InlineKeyboardButton(back_to_settings_label, callback_data="settings")) 
     
     # Next page button (if not the last item)
-    if current_index < total_count - 1:
+    if total_count > 0 and current_index < total_count - 1:
         next_offset = current_index + 1
         next_label = "➡️"
-        # if language == 'en': next_label = "➡️"
-        # elif language == 'kk': next_label = "➡️"
-        row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{original_msg_id}:{next_offset}"))
+        nav_row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{original_msg_id}:{next_offset}"))
     else:
-        row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
+        nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
-    buttons.append(row)
+    buttons.append(nav_row)
+
+    # Add Delete and Export buttons in a new row
+    action_row = []
+    delete_label = get_string('history_delete', language)
+    export_label = get_string('history_export', language)
+    
+    # Note: Using original_msg_id in callback data for context, though not strictly necessary for the action itself
+    action_row.append(InlineKeyboardButton(delete_label, callback_data=f"delete_history_confirm:{original_msg_id}:{current_offset}")) # Include offset for cancel
+    action_row.append(InlineKeyboardButton(export_label, callback_data=f"export_history:{original_msg_id}"))
+    buttons.append(action_row)
     
     return InlineKeyboardMarkup(buttons)
 
@@ -1360,6 +1367,7 @@ async def button_callback(update: Update, context: CallbackContext):
     """Handle button callbacks from inline keyboards."""
     query = update.callback_query
     chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
     
     # Parse the callback data
     data_parts = query.data.split(":")
@@ -1569,6 +1577,7 @@ async def button_callback(update: Update, context: CallbackContext):
         history_btn_text = "📚 History"
         sub_btn_text = "💰 Subscription Info"
         mode_btn_text = "⚙️ Default Mode"
+        help_btn_text = get_string('settings_help', chat_lang) # New Help button
         close_btn_text = "❌ Close"
         back_to_msg_text = "⬅️ Back to Message"
         
@@ -1577,6 +1586,7 @@ async def button_callback(update: Update, context: CallbackContext):
             history_btn_text = "📚 История"
             sub_btn_text = "💰 Информация о подписке"
             mode_btn_text = "⚙️ Выбор режима"
+            # help_btn_text is already localized via get_string
             close_btn_text = "❌ Закрыть"
             back_to_msg_text = "⬅️ Назад к сообщению"
         elif chat_lang == 'kk':
@@ -1584,6 +1594,7 @@ async def button_callback(update: Update, context: CallbackContext):
             history_btn_text = "📚 Тарих"
             sub_btn_text = "💰 Жазылым туралы ақпарат"
             mode_btn_text = "⚙️ Әдепкі режим"
+            # help_btn_text is already localized via get_string
             close_btn_text = "❌ Жабу"
             back_to_msg_text = "⬅️ Хабарламаға оралу"
         
@@ -1592,6 +1603,7 @@ async def button_callback(update: Update, context: CallbackContext):
             [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
             [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
             [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
+            [InlineKeyboardButton(help_btn_text, callback_data="help")], # Added Help button
         ]
         
         # Add "Back to Message" button if opened from a message
@@ -1803,7 +1815,122 @@ async def button_callback(update: Update, context: CallbackContext):
             await query.answer(error_message, show_alert=True)
         return
     
-    # For original message callbacks, ensure we have the original_msg_id
+    # --- History Action Handlers ---
+    elif action == "delete_history_confirm":
+        if len(data_parts) < 3:
+            await query.answer("Missing data for delete confirmation", show_alert=True)
+            return
+        try:
+            original_msg_id = int(data_parts[1])
+            current_offset = int(data_parts[2]) # Needed for cancel
+        except ValueError:
+            await query.answer("Invalid data format for delete confirmation", show_alert=True)
+            return
+        
+        confirm_text = get_string('history_delete_confirm', chat_lang)
+        yes_button = InlineKeyboardButton(get_string('history_delete_yes', chat_lang), callback_data=f"delete_history_execute:{original_msg_id}")
+        cancel_button = InlineKeyboardButton(get_string('history_delete_cancel', chat_lang), callback_data=f"history_nav:{original_msg_id}:{current_offset}")
+        
+        keyboard = [[yes_button, cancel_button]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(confirm_text, reply_markup=reply_markup)
+        await query.answer()
+        return
+        
+    elif action == "delete_history_execute":
+        if len(data_parts) < 2:
+            await query.answer("Missing data for delete execution", show_alert=True)
+            return
+        try:
+            original_msg_id = int(data_parts[1]) # Keep for potential future use
+        except ValueError:
+            await query.answer("Invalid data format for delete execution", show_alert=True)
+            return
+            
+        success = await delete_chat_history(pool, chat_id)
+        
+        if success:
+            await query.edit_message_text(get_string('history_deleted', chat_lang))
+            # Optional: Automatically navigate back to settings after deletion
+            # await settings_command(update, context) # Requires settings_command to handle callback query context
+        else:
+            await query.edit_message_text(get_string('history_delete_error', chat_lang))
+        await query.answer()
+        return
+
+    elif action == "export_history":
+        if len(data_parts) < 2:
+            await query.answer("Missing data for export", show_alert=True)
+            return
+        try:
+            original_msg_id = int(data_parts[1]) # Keep for potential future use
+        except ValueError:
+            await query.answer("Invalid data format for export", show_alert=True)
+            return
+            
+        await query.answer() # Acknowledge button press immediately
+        status_msg = await context.bot.send_message(chat_id, get_string('history_exporting', chat_lang))
+        
+        try:
+            history_records = await get_all_chat_history(pool, chat_id)
+            
+            if not history_records:
+                await status_msg.edit_text(get_string('history_export_empty', chat_lang))
+                return
+                
+            export_lines = []
+            moscow_tz = pytz.timezone('Europe/Moscow') # Ensure pytz is imported
+            
+            for record in history_records:
+                author_name = "Unknown User"
+                record_user_id = record.get('user_id')
+                if record_user_id:
+                    try:
+                        author_chat = await context.bot.get_chat(record_user_id)
+                        author_name = author_chat.full_name or author_name
+                    except Exception as name_e:
+                        logger.warning(f"Could not fetch author name for user_id {record_user_id} during export: {name_e}")
+                        author_name = f"User ID {record_user_id}"
+                        
+                created_at_utc = record['created_at']
+                created_at_moscow = created_at_utc.astimezone(moscow_tz) if created_at_utc else None
+                time_str = created_at_moscow.strftime('%Y-%m-%d %H:%M:%S МСК') if created_at_moscow else "(no date)"
+                
+                mode_key = record.get('mode', 'unknown')
+                localized_mode_name = get_mode_name(mode_key, chat_lang)
+                
+                summary = record.get('summary_text', None)
+                transcript = record.get('transcript_text', None)
+                text_to_display = summary if summary is not None else transcript if transcript is not None else "(empty)"
+                
+                # Basic formatting for the TXT file
+                export_lines.append(f"--- Entry ---")
+                export_lines.append(f"Time: {time_str}")
+                export_lines.append(f"Author: {author_name}")
+                export_lines.append(f"Mode: {localized_mode_name}")
+                export_lines.append(f"Content:\n{text_to_display}")
+                export_lines.append("\n") # Add a blank line between entries
+
+            history_str = "\n".join(export_lines)
+            # Corrected datetime usage
+            file_name = f"history_{chat_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            
+            f = io.BytesIO(history_str.encode('utf-8'))
+            f.name = file_name
+            
+            await context.bot.send_document(chat_id=chat_id, document=f)
+            await status_msg.edit_text(get_string('history_export_complete', chat_lang))
+            
+        except Exception as e:
+            logger.error(f"Error exporting history for chat {chat_id}: {e}", exc_info=True)
+            try:
+                await status_msg.edit_text(get_string('history_export_error', chat_lang))
+            except Exception as edit_e:
+                logger.error(f"Failed to edit export status message after error: {edit_e}")
+        return
+
+    # --- Original Message Callbacks (Confirm, Mode, Redo, History Nav, Pin, etc.) ---
     if action in ["confirm", "mode_select", "mode_set", "redo", "history", "history_nav", 
                   "set_default_mode", "cancel_mode_select", "show_pin_menu", "back_to_message"]:
         if len(data_parts) < 2:

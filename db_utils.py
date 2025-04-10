@@ -348,4 +348,33 @@ async def get_user_history(pool: asyncpg.Pool, user_id: int, chat_id: int, limit
             return records, total_count
         except Exception as e:
             logger.error(f"Error fetching history for user {user_id}, chat {chat_id}: {e}", exc_info=True)
-            return [], 0 
+            return [], 0
+
+async def delete_chat_history(pool: asyncpg.Pool, chat_id: int) -> bool:
+    """Deletes all summary records for a specific chat."""
+    try:
+        async with pool.acquire() as connection:
+            result = await connection.execute("""
+                DELETE FROM summaries WHERE chat_id = $1;
+            """, chat_id)
+            logger.info(f"Deleted history for chat {chat_id}. Result: {result}")
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting history for chat {chat_id}: {e}", exc_info=True)
+        return False
+
+async def get_all_chat_history(pool: asyncpg.Pool, chat_id: int) -> list[asyncpg.Record]:
+    """Fetches all summary records for a specific chat, ordered by creation date."""
+    try:
+        async with pool.acquire() as connection:
+            records = await connection.fetch("""
+                SELECT user_id, mode, summary_text, transcript_text, created_at 
+                FROM summaries 
+                WHERE chat_id = $1 
+                ORDER BY created_at ASC;
+            """, chat_id)
+            logger.info(f"Fetched {len(records)} history records for export for chat {chat_id}")
+            return records
+    except Exception as e:
+        logger.error(f"Error fetching all history for export for chat {chat_id}: {e}", exc_info=True)
+        return [] 
