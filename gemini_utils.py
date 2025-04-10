@@ -90,7 +90,7 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
     """
     logger.info(f"Processing audio file {audio_file_path} with mode '{mode}' in language '{language}'")
     
-    if mode not in SUPPORTED_MODES:
+    if mode not in SUPPORTED_MODES and mode not in INTERNAL_MODES:
         logger.error(f"Unsupported mode requested: {mode}")
         return None, None
 
@@ -232,7 +232,7 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
                         - Сохраняй оригинальную перспективу/голос (если кто-то говорит "Я тебе позвоню", пиши "Позвонит", а не "Говорящий позвонит слушателю")
                         - Сохраняй оригинальные местоимения и обращения (используй "ты", "вы", "мы", "они" как в оригинале)
                         - НЕ используй обращения в третьем лице типа "говорящий", "собеседник", "участник" и т.п.
-                        
+                        - Если недостаточно данных, то так и скажи, а не используй бездумно пример. Не используй ничего из примера напрямую, твои ответы всегда должны включать лишь то, что в транскрипте ты получил
                         ВАЖНО: Telegram имеет ограниченную поддержку Markdown. Соблюдай следующие правила:
                         - Используй ТОЛЬКО эмодзи в начале каждого раздела (не заключай их в звездочки)
                         - Не используй знаки # для заголовков, они не поддерживаются в Telegram
@@ -752,10 +752,10 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
                         
                         Format your response as:
                         
-                        📝 ORIGINAL ({original_language.upper()}):
+                        📝 ORIGINAL (this word in {language}) ({original_language.upper()}):
                         [Original transcript]
                         
-                        🔄 TRANSLATION ({language.upper()}):
+                        🔄 TRANSLATION (this word in {language}) ({language.upper()}):
                         [Translated transcript]
                         """
                         
@@ -766,7 +766,9 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
                         # Languages match or couldn't be detected - show only the original
                         # Format with a simple header
                         lang_display = original_language.upper() if original_language else "ORIGINAL"
-                        transcript_text = f"📝{lang_display}:\n\n{original_transcript}"
+                        # Get the localized mode name for "as_is" mode
+                        mode_name = get_mode_name("as_is", language)
+                        transcript_text = f"📝 {mode_name} ({lang_display}):\n\n{original_transcript}"
                         logger.info(f"Original transcript used without translation.")
                     
                     # For as_is mode, summary_text should be None so transcript_text is displayed

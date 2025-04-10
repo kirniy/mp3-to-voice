@@ -17,7 +17,7 @@ from telegram.helpers import escape_markdown as telegram_escape_markdown # Added
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
-from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, clear_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language # Added get_user_history
+from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, clear_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status # Added get_user_history
 from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
 
 # Enable logging
@@ -188,18 +188,18 @@ def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineK
     # Localize button labels
     mode_label = "👤 Режим"
     redo_label = "🔁 Заново" 
-    history_label = "📚 История"
+    settings_label = "⚙️ Настройки" # Use the gear icon
     done_label = "❎ Готово"
     
     if language == 'en':
         mode_label = "👤 Mode"
         redo_label = "🔁 Redo"
-        history_label = "📚 History"
+        settings_label = "⚙️ Settings" # Use the gear icon
         done_label = "❎ Done"
     elif language == 'kk':
         mode_label = "👤 Режим"
         redo_label = "🔁 Қайта"
-        history_label = "📚 Тарих"
+        settings_label = "⚙️ Параметрлер" # Use the gear icon
         done_label = "❎ Дайын"
         
     return InlineKeyboardMarkup([
@@ -208,30 +208,93 @@ def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineK
             InlineKeyboardButton(redo_label, callback_data=f"redo:{original_msg_id}"),
         ],
         [
-            InlineKeyboardButton(history_label, callback_data=f"history:{original_msg_id}:0"),
+            InlineKeyboardButton(settings_label, callback_data="settings"), # Use the correct callback_data
             InlineKeyboardButton(done_label, callback_data=f"confirm:{original_msg_id}"),
         ]
     ])
 
 # --- History Formatting Helpers ---
 
-def format_history_message(record: asyncpg.Record, current_index: int, total_count: int) -> str:
+def create_voice_settings_buttons(original_msg_id: int, language: str = 'ru') -> InlineKeyboardMarkup:
+    """Creates the settings buttons for voice message responses."""
+    # Localize button labels
+    language_label = "🌐 Язык"
+    history_label = "📚 История"
+    mode_label = "⚙️ Режим"
+    subscription_label = "💰 Подписка"
+    back_label = "⬅️ Назад"
+    
+    if language == 'en':
+        language_label = "🌐 Language"
+        history_label = "📚 History"
+        mode_label = "⚙️ Mode"
+        subscription_label = "💰 Subscription"
+        back_label = "⬅️ Back"
+    elif language == 'kk':
+        language_label = "🌐 Тіл"
+        history_label = "📚 Тарих"
+        mode_label = "⚙️ Режим"
+        subscription_label = "💰 Жазылым"
+        back_label = "⬅️ Артқа"
+        
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(language_label, callback_data=f"voice_language_menu:{original_msg_id}"),
+            InlineKeyboardButton(mode_label, callback_data=f"mode_select:{original_msg_id}"),
+        ],
+        [
+            InlineKeyboardButton(history_label, callback_data=f"history:{original_msg_id}:0"),
+            InlineKeyboardButton(subscription_label, callback_data=f"voice_subscription_info:{original_msg_id}"),
+        ],
+        [
+            InlineKeyboardButton(back_label, callback_data=f"back_to_main:{original_msg_id}")
+        ]
+    ])
+
+def format_history_message(record: asyncpg.Record, current_index: int, total_count: int, language: str = 'ru') -> str:
     """Formats a single history record for display using MarkdownV2."""
-    mode_display = SUPPORTED_MODES.get(record['mode'], record['mode'])
-    text_to_display = record['summary_text'] if record['summary_text'] else record['transcript_text']
+    # Safely get text, defaulting to an empty string if both are None
+    summary = record.get('summary_text', None)
+    transcript = record.get('transcript_text', None)
+    text_to_display = summary if summary is not None else transcript if transcript is not None else "" 
+
+    # Safely get mode, defaulting to a placeholder string if None or invalid
+    mode_key = record.get('mode', 'unknown')
+    # Ensure mode_key is a string before using it in .get()
+    if not isinstance(mode_key, str):
+        mode_key = 'unknown'
+    mode_display = SUPPORTED_MODES.get(mode_key, mode_key) # Get display name or use the key itself
+    # Ensure mode_display is a string before escaping
+    if not isinstance(mode_display, str):
+        mode_display = str(mode_display) 
+
     created_at_utc = record['created_at']
     
     moscow_tz = pytz.timezone('Europe/Moscow')
-    created_at_moscow = created_at_utc.astimezone(moscow_tz)
-    time_str = escape_markdown(created_at_moscow.strftime('%d.%m.%Y %H:%M МСК'), version=2)
+    created_at_moscow = created_at_utc.astimezone(moscow_tz) if created_at_utc else None # Handle None created_at
+    # Ensure time_str is generated safely even if created_at is somehow None
+    time_str = escape_markdown(created_at_moscow.strftime('%d.%m.%Y %H:%M МСК'), version=2) if created_at_moscow else "(no date)"
     escaped_mode = escape_markdown(mode_display, version=2)
     
+    # Localized header
+    header_text = f"История \\({current_index}/{total_count}\\)"
+    if language == 'en':
+        header_text = f"History \\({current_index}/{total_count}\\)"
+    elif language == 'kk':
+        header_text = f"Тарих \\({current_index}/{total_count}\\)"
+    
     # Use MarkdownV2 formatting - Bold for heading, italic for mode
-    # Note: Telegram doesn't support # headings, so we use bold instead
-    header = f"*История \\({current_index}/{total_count}\\)* \\| _{escaped_mode}_ \\| {time_str}"
+    header = f"*{header_text}* \\| _{escaped_mode}_ \\| {time_str}"
     
     # Content with proper formatting preservation
-    escaped_text = escape_markdown_preserve_formatting(text_to_display or "(пусто)")
+    empty_text = "(пусто)"
+    if language == 'en':
+        empty_text = "(empty)"
+    elif language == 'kk':
+        empty_text = "(бос)"
+    
+    # Use empty_text if text_to_display ended up being empty after the initial check
+    escaped_text = escape_markdown_preserve_formatting(text_to_display if text_to_display else empty_text)
     
     # Don't use code block to allow formatting to be visible
     return f"{header}\n\n{escaped_text}"
@@ -259,9 +322,13 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     else:
         row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
-    # Current page indicator
-    page_indicator = f"📄 {current_page}/{total_pages}"
-    row.append(InlineKeyboardButton(page_indicator, callback_data="noop")) # Just display
+    # Center button to return to main menu
+    back_to_menu_label = "🔍 Меню"
+    if language == 'en':
+        back_to_menu_label = "🔍 Menu"
+    elif language == 'kk':
+        back_to_menu_label = "🔍 Мәзір"
+    row.append(InlineKeyboardButton(back_to_menu_label, callback_data=f"back_to_main:{original_msg_id}"))
     
     # Next page button
     if current_page < total_pages:
@@ -277,11 +344,6 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     
     buttons.append(row)
     
-    # Optional close button - could be added if needed
-    # buttons.append([InlineKeyboardButton("Закрыть историю", callback_data=f"close_history:{original_msg_id}")])
-    
-    # For now, let user press "Готово" on original message or send new voice msg
-
     if not buttons:
         return None
     return InlineKeyboardMarkup(buttons)
@@ -315,7 +377,7 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
     }
     
     # Define the order of modes
-    mode_order = ["brief", "detailed", "bullet", "combined", "pasha", "as_is"]
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -325,59 +387,40 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
         logger.error(f"Error getting default mode: {e}")
     
     # Localized button texts
-    default_label = "📌 По умолчанию" # Russian default
-    set_default_label = "📌 Сделать по умолчанию"
-    reset_defaults_label = "🔄 Сбросить умолчания"
+    pin_label = "📌 Закрепить"
     cancel_label = "❌ Отмена"
     
     if chat_lang == 'en':
-        default_label = "📌 Default"
-        set_default_label = "📌 Set as Default"
-        reset_defaults_label = "🔄 Reset Defaults"
+        pin_label = "📌 Pin"
         cancel_label = "❌ Cancel"
     elif chat_lang == 'kk':
-        default_label = "📌 Әдепкі"
-        set_default_label = "📌 Әдепкі ретінде орнату"
-        reset_defaults_label = "🔄 Әдепкілерді қалпына келтіру"
+        pin_label = "📌 Бекіту"
         cancel_label = "❌ Болдырмау"
     
-    # Add each mode with a separate "Set as Default" button
+    # Add each mode selection button
     for mode_key in mode_order:
         if mode_key in SUPPORTED_MODES:
             emoji = mode_emojis.get(mode_key, "")
             # Get localized mode name
             mode_name = get_mode_name(mode_key, chat_lang)
             
-            # Add a row for each mode
-            mode_row = []
+            # Add indicator if this is the default mode
+            if mode_key == current_default_mode:
+                mode_name = f"{mode_name} ★"
             
             # Mode selection button
-            mode_row.append(InlineKeyboardButton(
-                f"{emoji} {mode_name}", 
-                callback_data=f"mode_set:{original_msg_id}:{mode_key}"
-            ))
-            
-            # Default indicator or Set Default button
-            if mode_key == current_default_mode:
-                # This is already the default mode
-                mode_row.append(InlineKeyboardButton(
-                    default_label, 
-                    callback_data="noop"
-                ))
-            else:
-                # Option to set as default
-                mode_row.append(InlineKeyboardButton(
-                    set_default_label, 
-                    callback_data=f"set_default_mode:{original_msg_id}:{mode_key}"
-                ))
-            
-            keyboard.append(mode_row)
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{emoji} {mode_name}", 
+                    callback_data=f"mode_set:{original_msg_id}:{mode_key}"
+                )
+            ])
     
-    # Add reset default and cancel buttons
+    # Add pin and cancel buttons
     bottom_row = []
     bottom_row.append(InlineKeyboardButton(
-        reset_defaults_label, 
-        callback_data=f"reset_default_mode:{original_msg_id}"
+        pin_label, 
+        callback_data=f"show_pin_menu:{original_msg_id}"
     ))
     bottom_row.append(InlineKeyboardButton(
         cancel_label, 
@@ -666,6 +709,9 @@ async def handle_history_navigation(update: Update, context: CallbackContext, da
     offset = int(data_parts[2])
     
     try:
+        # Get chat's language
+        chat_lang = await get_chat_language(pool, chat_id)
+        
         # Get history records
         history_records, total_count = await get_user_history(
             pool, user_id, chat_id, limit=HISTORY_PAGE_SIZE, offset=offset
@@ -676,18 +722,26 @@ async def handle_history_navigation(update: Update, context: CallbackContext, da
             return
         
         # Format the history message
-        record = history_records[0]
-        current_index = offset + 1
-        message_text = format_history_message(record, current_index, total_count)
+        history_message = ""
+        
+        for i, record in enumerate(history_records, 1):
+            current_index = offset + i
+            formatted_entry = format_history_message(
+                record, current_index, total_count, chat_lang
+            )
+            history_message += formatted_entry
+            
+            # Add separator between entries
+            if i < len(history_records):
+                history_message += "\n\n" + "—" * 20 + "\n\n"
         
         # Create pagination buttons
         reply_markup = create_history_pagination_buttons(original_msg_id, offset, total_count, HISTORY_PAGE_SIZE, chat_lang)
         
         # Update the message
         await query.edit_message_text(
-            message_text,
+            history_message,
             reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN_V2
         )
         
         logger.info(f"Updated history view for user {user_id} to offset {offset}")
@@ -695,6 +749,190 @@ async def handle_history_navigation(update: Update, context: CallbackContext, da
     except Exception as e:
         logger.error(f"Error in handle_history_navigation: {e}", exc_info=True)
         await query.answer("Error navigating history / Ошибка при навигации по истории", show_alert=True)
+
+async def show_pin_menu(update: Update, context: CallbackContext, original_msg_id: int):
+    """Shows a menu for pinning a default mode."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    pool = context.bot_data.get('db_pool')
+    
+    if not pool:
+        await query.answer("Database error", show_alert=True)
+        return
+    
+    # Get chat's current language
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Create pin menu keyboard
+    keyboard = []
+    
+    # Add appropriate emojis for each mode
+    mode_emojis = {
+        "brief": "📝",
+        "detailed": "📋",
+        "bullet": "🔍",
+        "combined": "📊",
+        "as_is": "📄",
+        "pasha": "💊"
+    }
+    
+    # Define the order of modes
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
+    
+    # Get current default mode
+    current_default_mode = DEFAULT_MODE
+    try:
+        current_default_mode = await get_chat_default_mode(pool, chat_id, DEFAULT_MODE)
+    except Exception as e:
+        logger.error(f"Error getting default mode: {e}")
+    
+    # Localized button texts
+    back_label = "⬅️ Назад"
+    
+    if chat_lang == 'en':
+        back_label = "⬅️ Back"
+    elif chat_lang == 'kk':
+        back_label = "⬅️ Артқа"
+    
+    # Add each mode with selection indicator
+    for mode_key in mode_order:
+        if mode_key in SUPPORTED_MODES:
+            emoji = mode_emojis.get(mode_key, "")
+            # Get localized mode name
+            mode_name = get_mode_name(mode_key, chat_lang)
+            
+            # Add selection indicator
+            if mode_key == current_default_mode:
+                mode_name = f"{mode_name} ✓"
+                
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{emoji} {mode_name}", 
+                    callback_data=f"set_default_mode:{original_msg_id}:{mode_key}"
+                )
+            ])
+    
+    # Add back button
+    keyboard.append([
+        InlineKeyboardButton(
+            back_label, 
+            callback_data=f"mode_select:{original_msg_id}"
+        )
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+        logger.info(f"Showed pin menu for message {original_msg_id} in language {chat_lang}")
+    except Exception as e:
+        logger.error(f"Error showing pin menu: {e}", exc_info=True)
+        
+        # Error message based on chat language
+        error_message = "Error showing pin menu"
+        if chat_lang == 'ru':
+            error_message = "Ошибка при отображении меню закрепления"
+        elif chat_lang == 'kk':
+            error_message = "Бекіту мәзірін көрсету кезінде қате"
+            
+        await query.answer(error_message, show_alert=True)
+
+async def show_settings_mode_menu(update: Update, context: CallbackContext):
+    """Shows a menu for setting the default mode from settings."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    pool = context.bot_data.get('db_pool')
+    
+    if not pool:
+        await query.answer("Database error", show_alert=True)
+        return
+    
+    # Get chat's current language
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Create mode selection keyboard
+    keyboard = []
+    
+    # Add appropriate emojis for each mode
+    mode_emojis = {
+        "brief": "📝",
+        "detailed": "📋",
+        "bullet": "🔍",
+        "combined": "📊",
+        "as_is": "📄",
+        "pasha": "💊"
+    }
+    
+    # Define the order of modes
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
+    
+    # Get current default mode
+    current_default_mode = DEFAULT_MODE
+    try:
+        current_default_mode = await get_chat_default_mode(pool, chat_id, DEFAULT_MODE)
+    except Exception as e:
+        logger.error(f"Error getting default mode: {e}")
+    
+    # Localized button texts
+    back_label = "⬅️ Назад"
+    
+    if chat_lang == 'en':
+        back_label = "⬅️ Back"
+    elif chat_lang == 'kk':
+        back_label = "⬅️ Артқа"
+    
+    # Localized heading text
+    heading_text = "Select default mode for voice messages:"
+    if chat_lang == 'ru':
+        heading_text = "Выберите режим по умолчанию для голосовых сообщений:"
+    elif chat_lang == 'kk':
+        heading_text = "Дауыстық хабарламалар үшін әдепкі режимді таңдаңыз:"
+    
+    # Add each mode with selection indicator
+    for mode_key in mode_order:
+        if mode_key in SUPPORTED_MODES:
+            emoji = mode_emojis.get(mode_key, "")
+            # Get localized mode name
+            mode_name = get_mode_name(mode_key, chat_lang)
+            
+            # Add selection indicator
+            if mode_key == current_default_mode:
+                mode_name = f"{mode_name} ✓"
+                
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{emoji} {mode_name}", 
+                    callback_data=f"settings_set_default_mode:{mode_key}"
+                )
+            ])
+    
+    # Add back button
+    keyboard.append([
+        InlineKeyboardButton(
+            back_label, 
+            callback_data="settings"
+        )
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        await query.edit_message_text(
+            heading_text,
+            reply_markup=reply_markup
+        )
+        logger.info(f"Showed settings mode menu for chat {chat_id} in language {chat_lang}")
+    except Exception as e:
+        logger.error(f"Error showing settings mode menu: {e}", exc_info=True)
+        
+        # Error message based on chat language
+        error_message = "Error showing mode settings"
+        if chat_lang == 'ru':
+            error_message = "Ошибка при отображении настроек режима"
+        elif chat_lang == 'kk':
+            error_message = "Режим параметрлерін көрсету кезінде қате"
+            
+        await query.answer(error_message, show_alert=True)
 
 # --- Command Handlers ---
 
@@ -711,9 +949,6 @@ async def start(update: Update, context: CallbackContext) -> None:
     
     # Get chat's current language
     chat_lang = await get_chat_language(pool, chat.id)
-    
-    # Send a brief welcome message
-    await update.message.reply_text(get_string('start_brief', chat_lang))
     
     # Create keyboard with language options
     keyboard = []
@@ -738,47 +973,165 @@ async def start(update: Update, context: CallbackContext) -> None:
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Send language selection message in current chat language
+    # Send the welcome message with language selection buttons
     await update.message.reply_text(
-        get_string('choose_language', chat_lang),
-        reply_markup=reply_markup
+        get_string('start', chat_lang),
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.MARKDOWN
     )
 
-async def history_command(update: Update, context: CallbackContext) -> None:
-    """Handles the /history command."""
+async def settings_command(update: Update, context: CallbackContext) -> None:
+    """Show settings menu."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    logger.info(f"Settings command from user {user_id} in chat {chat_id}")
+    
+    # Get database pool
+    pool = context.bot_data.get('db_pool')
+    if not pool:
+        await update.message.reply_text("Database error. Please try again later.")
+        return
+    
+    # Get chat language
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Localize menu options
+    lang_btn_text = "🌐 Change Language"
+    history_btn_text = "📚 History"
+    sub_btn_text = "💰 Subscription Info"
+    mode_btn_text = "⚙️ Default Mode"
+    close_btn_text = "❌ Close"
+    
+    if chat_lang == 'ru':
+        lang_btn_text = "🌐 Изменить язык"
+        history_btn_text = "📚 История"
+        sub_btn_text = "💰 Информация о подписке"
+        mode_btn_text = "⚙️ Режимы"
+        close_btn_text = "❌ Закрыть"
+    elif chat_lang == 'kk':
+        lang_btn_text = "🌐 Тілді өзгерту"
+        history_btn_text = "📚 Тарих"
+        sub_btn_text = "💰 Жазылым туралы ақпарат"
+        mode_btn_text = "⚙️ Режим"
+        close_btn_text = "❌ Жабу"
+    
+    # Create keyboard
+    keyboard = [
+        [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
+        [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
+        [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
+        [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
+        [InlineKeyboardButton(close_btn_text, callback_data="close_settings")]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get appropriate welcome message based on language
+    welcome_text = "Please select an option:"
+    if chat_lang == 'ru':
+        welcome_text = "Пожалуйста, выберите опцию:"
+    elif chat_lang == 'kk':
+        welcome_text = "Опцияны таңдаңыз:"
+    
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+
+async def help_command(update: Update, context: CallbackContext) -> None:
+    """Sends detailed help information about the bot."""
     user = update.effective_user
     chat = update.effective_chat
     pool = context.bot_data.get('db_pool')
-
-    if not user or not chat:
-        logger.warning("Could not get user/chat info for /history command")
-        return
+    
     if not pool:
-        logger.error("Database pool not available for /history")
-        await update.message.reply_text(get_dual_string('error'))
+        logger.error("Database pool not available in help command")
+        await update.message.reply_text("Error connecting to database. Please try again later.")
         return
     
-    await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
+    # Get chat's current language
+    chat_lang = await get_chat_language(pool, chat.id)
     
-    offset = 0
-    history_records, total_count = await get_user_history(
-        pool, user.id, chat.id, limit=HISTORY_PAGE_SIZE, offset=offset
-    )
-
-    if not history_records:
-        await update.message.reply_text("Ваша история сводок пуста.") # TODO: Add to locales
-        return
-
-    record = history_records[0]
-    current_index = offset + 1
-    message_text = format_history_message(record, current_index, total_count)
-    reply_markup = create_history_pagination_buttons(update.message.message_id, offset, total_count, HISTORY_PAGE_SIZE)
-
+    settings_label = "⚙️ Настройки"
+    
+    if chat_lang == 'en':
+        settings_label = "⚙️ Settings"
+    elif chat_lang == 'kk':
+        settings_label = "⚙️ Параметрлер"
+    
+    # Create settings button
+    help_buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton(settings_label, callback_data="settings")]
+    ])
+    
     await update.message.reply_text(
-        message_text,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN_V2 # Changed to V2
+        get_string('help', chat_lang),
+        reply_markup=help_buttons,
+        parse_mode=ParseMode.MARKDOWN
     )
+
+async def pause_command(update: Update, context: CallbackContext) -> None:
+    """Pauses the bot for the current chat."""
+    user = update.effective_user
+    chat = update.effective_chat
+    pool = context.bot_data.get('db_pool')
+    
+    if not pool:
+        logger.error("Database pool not available in pause command")
+        await update.message.reply_text("Error connecting to database. Please try again later.")
+        return
+    
+    # Get chat's current language
+    chat_lang = await get_chat_language(pool, chat.id)
+    
+    # Set a flag in the database that this chat is paused
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                INSERT INTO chat_preferences (chat_id, is_paused, updated_at)
+                VALUES ($1, TRUE, NOW())
+                ON CONFLICT (chat_id)
+                DO UPDATE SET is_paused = TRUE, updated_at = NOW();
+            """, chat.id)
+            
+            await update.message.reply_text(
+                get_string('pause_success', chat_lang),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Bot paused for chat {chat.id}")
+        except Exception as e:
+            logger.error(f"Error pausing bot for chat {chat.id}: {e}", exc_info=True)
+            await update.message.reply_text(get_dual_string('error'))
+
+async def resume_command(update: Update, context: CallbackContext) -> None:
+    """Resumes the bot for the current chat."""
+    user = update.effective_user
+    chat = update.effective_chat
+    pool = context.bot_data.get('db_pool')
+    
+    if not pool:
+        logger.error("Database pool not available in resume command")
+        await update.message.reply_text("Error connecting to database. Please try again later.")
+        return
+    
+    # Get chat's current language
+    chat_lang = await get_chat_language(pool, chat.id)
+    
+    # Set a flag in the database that this chat is no longer paused
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                INSERT INTO chat_preferences (chat_id, is_paused, updated_at)
+                VALUES ($1, FALSE, NOW())
+                ON CONFLICT (chat_id)
+                DO UPDATE SET is_paused = FALSE, updated_at = NOW();
+            """, chat.id)
+            
+            await update.message.reply_text(
+                get_string('resume_success', chat_lang),
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Bot resumed for chat {chat.id}")
+        except Exception as e:
+            logger.error(f"Error resuming bot for chat {chat.id}: {e}", exc_info=True)
+            await update.message.reply_text(get_dual_string('error'))
 
 # --- Message Handlers ---
 
@@ -868,6 +1221,14 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
 
     # Get chat's language preference
     chat_lang = await get_chat_language(pool, message.chat_id)
+    
+    # Check if the bot is paused for this chat
+    is_paused = await get_chat_paused_status(pool, message.chat_id)
+    if is_paused:
+        logger.info(f"Ignoring voice message {message.message_id} because bot is paused for chat {message.chat_id}")
+        # Don't respond at all when paused
+        return
+    
     logger.info(f"Received voice message {message.message_id} from user {user.id} (duration: {voice.duration}s, chat language: {chat_lang})")
 
     # Acknowledge receipt with chat's preferred language
@@ -918,18 +1279,18 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         # Localize button labels
         mode_label = "👤 Режим"
         redo_label = "🔁 Заново" 
-        history_label = "📚 История"
+        settings_label = "⚙️ Настройки" # Use the gear icon and correct label
         done_label = "❎ Готово"
         
         if chat_lang == 'en':
             mode_label = "👤 Mode"
             redo_label = "🔁 Redo"
-            history_label = "📚 History"
+            settings_label = "⚙️ Settings" # Use the gear icon and correct label
             done_label = "❎ Done"
         elif chat_lang == 'kk':
             mode_label = "👤 Режим"
             redo_label = "🔁 Қайта"
-            history_label = "📚 Тарих"
+            settings_label = "⚙️ Параметрлер" # Use the gear icon and correct label
             done_label = "❎ Дайын"
         
         keyboard = [
@@ -938,7 +1299,7 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
                 InlineKeyboardButton(redo_label, callback_data=f"redo:{message.message_id}"),
             ],
             [
-                InlineKeyboardButton(history_label, callback_data=f"history:{message.message_id}:0"),
+                InlineKeyboardButton(settings_label, callback_data="settings"), # Use the correct callback_data
                 InlineKeyboardButton(done_label, callback_data=f"confirm:{message.message_id}"),
             ]
         ]
@@ -985,18 +1346,18 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
 
 # --- Callback Query Handler ---
 
-async def button_callback_handler(update: Update, context: CallbackContext):
-    """Handle clicks on inline keyboard buttons."""
-    
+async def button_callback(update: Update, context: CallbackContext):
+    """Handle button callbacks from inline keyboards."""
     query = update.callback_query
-    await query.answer()  # Required to acknowledge the callback
-    
-    # Parse callback data
-    data_parts = query.data.split(":")
-    action = data_parts[0]
     chat_id = update.effective_chat.id
     
-    # Get pool for database operations
+    # Parse the callback data
+    data_parts = query.data.split(":")
+    action = data_parts[0]
+    
+    logger.debug(f"Button callback: {action} with data {data_parts}")
+    
+    # Get database pool from context
     pool = context.bot_data.get('db_pool')
     if not pool:
         await query.answer("Database error", show_alert=True)
@@ -1007,6 +1368,128 @@ async def button_callback_handler(update: Update, context: CallbackContext):
     
     # Handle noop action specifically
     if action == "noop":
+        return
+    
+    # Handle show command history
+    elif action == "show_command_history":
+        if len(data_parts) < 2:
+            await query.answer("Invalid callback data", show_alert=True)
+            return
+        
+        # Parse offset parameter
+        try:
+            offset = int(data_parts[1])
+        except ValueError:
+            await query.answer("Invalid offset value", show_alert=True)
+            return
+        
+        # Get user history
+        user_id = update.effective_user.id
+        limit = 5  # Number of history items per page
+        
+        try:
+            # Fetch user history from database
+            history_records, total_count = await get_user_history(
+                pool, user_id, chat_id, limit, offset
+            )
+            
+            if not history_records:
+                # No history found
+                no_history_message = "You don't have any voice message history yet."
+                if chat_lang == 'ru':
+                    no_history_message = "У вас пока нет истории голосовых сообщений."
+                elif chat_lang == 'kk':
+                    no_history_message = "Сізде әлі дауыстық хабарлама тарихы жоқ."
+                
+                await query.edit_message_text(
+                    no_history_message,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("⬅️ Back", callback_data="settings")]
+                    ])
+                )
+                await query.answer()
+                return
+            
+            # Format history message
+            history_message = ""
+            
+            for i, record in enumerate(history_records, 1):
+                current_index = offset + i
+                formatted_entry = format_history_message(
+                    record, current_index, total_count, chat_lang
+                )
+                history_message += formatted_entry
+                
+                # Add separator between entries
+                if i < len(history_records):
+                    history_message += "\n\n" + "—" * 20 + "\n\n"
+            
+            # Create pagination buttons
+            buttons = []
+            
+            # Previous page button
+            if offset > 0:
+                prev_offset = max(0, offset - limit)
+                prev_text = "⬅️ Previous"
+                if chat_lang == 'ru':
+                    prev_text = "⬅️ Предыдущие"
+                elif chat_lang == 'kk':
+                    prev_text = "⬅️ Алдыңғы"
+                buttons.append(
+                    InlineKeyboardButton(
+                        prev_text, 
+                        callback_data=f"show_command_history:{prev_offset}"
+                    )
+                )
+            
+            # Next page button
+            if offset + limit < total_count:
+                next_offset = offset + limit
+                next_text = "Next ➡️"
+                if chat_lang == 'ru':
+                    next_text = "Следующие ➡️"
+                elif chat_lang == 'kk':
+                    next_text = "Келесі ➡️"
+                buttons.append(
+                    InlineKeyboardButton(
+                        next_text, 
+                        callback_data=f"show_command_history:{next_offset}"
+                    )
+                )
+            
+            # If we have both previous and next buttons, put them on the same row
+            pagination_row = []
+            if buttons:
+                pagination_row = [buttons]
+            
+            # Add back button
+            back_text = "⬅️ Back to Settings"
+            if chat_lang == 'ru':
+                back_text = "⬅️ Назад к настройкам"
+            elif chat_lang == 'kk':
+                back_text = "⬅️ Параметрлерге оралу"
+            
+            keyboard = pagination_row + [
+                [InlineKeyboardButton(back_text, callback_data="settings")]
+            ]
+            
+            # Update the message with history and pagination buttons
+            await query.edit_message_text(
+                history_message,
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+            
+        except Exception as e:
+            logger.error(f"Error displaying history: {str(e)}")
+            error_message = "Error retrieving history. Please try again later."
+            if chat_lang == 'ru':
+                error_message = "Ошибка при получении истории. Пожалуйста, попробуйте позже."
+            elif chat_lang == 'kk':
+                error_message = "Тарихты алу қатесі. Кейінірек қайталап көріңіз."
+            
+            await query.answer(error_message, show_alert=True)
+        
+        await query.answer()
         return
     
     # Handle language settings
@@ -1023,40 +1506,220 @@ async def button_callback_handler(update: Update, context: CallbackContext):
         # Set language for this chat
         success = await set_chat_language(pool, chat_id, language)
         if success:
-            # Get the language confirmation message
-            lang_info = LANGUAGES[language]
-            await query.edit_message_text(
-                get_string('language_set', language),
-                reply_markup=None
-            )
+            # Show confirmation
+            await query.answer(get_string('language_set', language), show_alert=True)
             
-            # Send the full welcome message in the selected language
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=get_string('start', language),
+            # Create settings and help buttons
+            settings_label = "⚙️ Настройки"
+            help_label = "❓ Помощь"
+            
+            if language == 'en':
+                settings_label = "⚙️ Settings"
+                help_label = "❓ Help"
+            elif language == 'kk':
+                settings_label = "⚙️ Параметрлер"
+                help_label = "❓ Көмек"
+            
+            start_buttons = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(settings_label, callback_data="settings"),
+                    InlineKeyboardButton(help_label, callback_data="help")
+                ]
+            ])
+            
+            # Get the welcome text without the language selection prompt
+            start_text = get_string('start', language)
+            # Replace the language selection prompt at the end with the voice check request
+            start_text = start_text.replace("**Please choose your language to start:**", "")
+            start_text = start_text.replace("**Пожалуйста, выберите ваш язык для начала:**", "")
+            start_text = start_text.replace("**Бастау үшін тілді таңдаңыз:**", "")
+            # Add the voice check request
+            start_text = start_text.strip() + "\n\n" + get_string('send_voice_check', language)
+            
+            # Update the message with the new language and buttons
+            await query.edit_message_text(
+                start_text,
+                reply_markup=start_buttons,
                 parse_mode=ParseMode.MARKDOWN
             )
         else:
             await query.answer("Failed to set language", show_alert=True)
         return
     
+    # Handle language setting from voice menu
+    elif action == "set_language_and_back":
+        if len(data_parts) < 3:
+            await query.answer("Missing parameters", show_alert=True)
+            return
+            
+        original_msg_id = int(data_parts[1])
+        language = data_parts[2]
+        
+        if language not in LANGUAGES:
+            await query.answer("Unsupported language", show_alert=True)
+            return
+        
+        # Set language for this chat
+        success = await set_chat_language(pool, chat_id, language)
+        if success:
+            # Show confirmation
+            lang_info = LANGUAGES[language]
+            confirm_message = f"Language set to {lang_info['name']}"
+            if language == 'ru':
+                confirm_message = f"Язык изменен на {lang_info['name']}"
+            elif language == 'kk':
+                confirm_message = f"Тіл {lang_info['name']} тіліне өзгертілді"
+                
+            await query.answer(confirm_message, show_alert=True)
+            
+            # Return to voice settings with updated language
+            await query.edit_message_reply_markup(
+                reply_markup=create_voice_settings_buttons(original_msg_id, language)
+            )
+        else:
+            await query.answer("Failed to set language", show_alert=True)
+        return
+    
     elif action == "settings":
-        # Create settings keyboard
+        # Localize menu options
+        lang_btn_text = "🌐 Change Language"
+        history_btn_text = "📚 History"
+        sub_btn_text = "💰 Subscription Info"
+        mode_btn_text = "⚙️ Default Mode"
+        close_btn_text = "❌ Close"
+        
+        if chat_lang == 'ru':
+            lang_btn_text = "🌐 Изменить язык"
+            history_btn_text = "📚 История"
+            sub_btn_text = "💰 Информация о подписке"
+            mode_btn_text = "⚙️ Выбор режима"
+            close_btn_text = "❌ Закрыть"
+        elif chat_lang == 'kk':
+            lang_btn_text = "🌐 Тілді өзгерту"
+            history_btn_text = "📚 Тарих"
+            sub_btn_text = "💰 Жазылым туралы ақпарат"
+            mode_btn_text = "⚙️ Әдепкі режим"
+            close_btn_text = "❌ Жабу"
+        
         keyboard = [
-            [InlineKeyboardButton("🌐 Change Language", callback_data="language_menu")],
-            [InlineKeyboardButton("💰 Subscription Info", callback_data="subscription_info")],
-            [InlineKeyboardButton("❌ Close", callback_data="close_settings")]
+            [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
+            [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
+            [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
+            [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
+            [InlineKeyboardButton(close_btn_text, callback_data="close_settings")]
         ]
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # Send settings message
+        # Get appropriate welcome message based on language
+        welcome_text = "Please select an option:"
+        if chat_lang == 'ru':
+            welcome_text = "Пожалуйста, выберите опцию:"
+        elif chat_lang == 'kk':
+            welcome_text = "Опцияны таңдаңыз:"
+            
+        await query.edit_message_text(welcome_text, reply_markup=reply_markup)
+        await query.answer()
+        return
+    
+    # Handle voice settings menu
+    elif action == "voice_settings":
+        if len(data_parts) < 2:
+            await query.answer("Missing message ID", show_alert=True)
+            return
+            
+        original_msg_id = int(data_parts[1])
+        await query.edit_message_reply_markup(
+            reply_markup=create_voice_settings_buttons(original_msg_id, chat_lang)
+        )
+        return
+        
+    # Handle subscription info from voice menu
+    elif action == "voice_subscription_info":
+        if len(data_parts) < 2:
+            await query.answer("Missing message ID", show_alert=True)
+            return
+            
+        original_msg_id = int(data_parts[1])
+        # Create back button to voice settings
+        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send subscription info
         await query.edit_message_text(
-            get_string('settings', chat_lang),
-            reply_markup=reply_markup
+            get_string('subscription_info', chat_lang),
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
         )
         return
     
+    # Handle help button
+    elif action == "help":
+        settings_label = "⚙️ Настройки"
+        
+        if chat_lang == 'en':
+            settings_label = "⚙️ Settings"
+        elif chat_lang == 'kk':
+            settings_label = "⚙️ Параметрлер"
+        
+        # Create settings button
+        help_buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton(settings_label, callback_data="settings")]
+        ])
+        
+        await query.edit_message_text(
+            get_string('help', chat_lang),
+            reply_markup=help_buttons,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Handle voice language menu
+    elif action == "voice_language_menu":
+        if len(data_parts) < 2:
+            await query.answer("Missing message ID", show_alert=True)
+            return
+            
+        original_msg_id = int(data_parts[1])
+        # Create keyboard with language options
+        keyboard = []
+        row = []
+        for code, lang_info in LANGUAGES.items():
+            button = InlineKeyboardButton(
+                f"{lang_info['emoji']} {lang_info['name']}", 
+                callback_data=f"set_language_and_back:{original_msg_id}:{code}"
+            )
+            row.append(button)
+            if len(row) == 2:  # 2 buttons per row
+                keyboard.append(row)
+                row = []
+        
+        if row:  # Add any remaining buttons
+            keyboard.append(row)
+        
+        # Add back button
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")
+        ])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        # Send language selection message
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+        return
+    
+    # Handle back to main menu from any submenu
+    elif action == "back_to_main":
+        if len(data_parts) < 2:
+            await query.answer("Missing message ID", show_alert=True)
+            return
+            
+        original_msg_id = int(data_parts[1])
+        await query.edit_message_reply_markup(
+            reply_markup=create_action_buttons(original_msg_id, chat_lang)
+        )
+        return
+        
     elif action == "language_menu":
         # Create keyboard with language options
         keyboard = []
@@ -1106,9 +1769,51 @@ async def button_callback_handler(update: Update, context: CallbackContext):
         await query.edit_message_text(get_string('settings', chat_lang) + " ✅")
         return
     
+    # Handle settings mode menu
+    elif action == "settings_mode_menu":
+        await show_settings_mode_menu(update, context)
+        return
+    
+    # Handle setting default mode from settings
+    elif action == "settings_set_default_mode":
+        if len(data_parts) < 2:
+            await query.answer("Missing mode parameter", show_alert=True)
+            return
+            
+        mode = data_parts[1]
+        if mode not in SUPPORTED_MODES:
+            await query.answer("Unsupported mode", show_alert=True)
+            return
+            
+        # Set this mode as default for the chat
+        success = await set_chat_default_mode(pool, chat_id, mode)
+        if success:
+            # Get mode name in current chat language
+            mode_name = get_mode_name(mode, chat_lang)
+            confirm_message = f"Mode '{mode_name}' set as default"
+            if chat_lang == 'ru':
+                confirm_message = f"Режим '{mode_name}' установлен по умолчанию"
+            elif chat_lang == 'kk':
+                confirm_message = f"Режим '{mode_name}' әдепкі бойынша орнатылды"
+            
+            await query.answer(confirm_message, show_alert=True)
+            
+            # Show updated settings mode menu
+            await show_settings_mode_menu(update, context)
+        else:
+            # Error message in current chat language
+            error_message = "Failed to set default mode"
+            if chat_lang == 'ru':
+                error_message = "Не удалось установить режим по умолчанию"
+            elif chat_lang == 'kk':
+                error_message = "Әдепкі режимді орнату сәтсіз аяқталды"
+            
+            await query.answer(error_message, show_alert=True)
+        return
+    
     # For original message callbacks, ensure we have the original_msg_id
     if action in ["confirm", "mode_select", "mode_set", "redo", "history", "history_nav", 
-                  "set_default_mode", "cancel_mode_select", "reset_default_mode"]:
+                  "set_default_mode", "cancel_mode_select", "show_pin_menu"]:
         if len(data_parts) < 2:
             await query.answer("Missing message ID", show_alert=True)
             return
@@ -1141,6 +1846,10 @@ async def button_callback_handler(update: Update, context: CallbackContext):
             await handle_history_navigation(update, context, data_parts)
             return
             
+        elif action == "show_pin_menu":
+            await show_pin_menu(update, context, original_msg_id)
+            return
+            
         elif action == "set_default_mode":
             if len(data_parts) < 3:
                 await query.answer("Missing mode parameter", show_alert=True)
@@ -1164,13 +1873,8 @@ async def button_callback_handler(update: Update, context: CallbackContext):
                 
                 await query.answer(confirm_message, show_alert=True)
                 
-                # Add the default mode button to the current mode keyboard
-                if action == "mode_set":
-                    # Return to mode selection with updated default
-                    await show_mode_selection(update, context, original_msg_id)
-                else:
-                    # Return to the original buttons
-                    await query.edit_message_reply_markup(reply_markup=create_action_buttons(original_msg_id, chat_lang))
+                # Return to mode selection with updated default
+                await show_mode_selection(update, context, original_msg_id)
             else:
                 # Error message in current chat language
                 error_message = "Failed to set default mode"
@@ -1186,48 +1890,10 @@ async def button_callback_handler(update: Update, context: CallbackContext):
             # Return to normal action buttons
             await query.edit_message_reply_markup(reply_markup=create_action_buttons(original_msg_id, chat_lang))
             return
-            
-        elif action == "reset_default_mode":
-            # Clear default mode for this chat
-            success = await clear_chat_default_mode(pool, chat_id)
-            if success:
-                # Get default mode name in current chat language
-                default_mode_name = get_mode_name(DEFAULT_MODE, chat_lang)
-                confirm_message = f"Default mode reset to '{default_mode_name}'"
-                if chat_lang == 'ru':
-                    confirm_message = f"Режим по умолчанию сброшен на '{default_mode_name}'"
-                elif chat_lang == 'kk':
-                    confirm_message = f"Әдепкі режим '{default_mode_name}' қалпына келтірілді"
-                
-                await query.answer(confirm_message, show_alert=True)
-                
-                # Return to the original buttons
-                await query.edit_message_reply_markup(reply_markup=create_action_buttons(original_msg_id, chat_lang))
-            else:
-                # Error message in current chat language
-                error_message = "Failed to reset default mode"
-                if chat_lang == 'ru':
-                    error_message = "Не удалось сбросить режим по умолчанию"
-                elif chat_lang == 'kk':
-                    error_message = "Әдепкі режимді қалпына келтіру сәтсіз аяқталды"
-                
-                await query.answer(error_message, show_alert=True)
-            return
     
-    # Handle unknown actions
-    logger.warning(f"Unknown button callback action: {action}")
-    
-    # Error message in current chat language
-    error_message = "Oops! Something went wrong with that button."
-    if chat_lang == 'ru':
-        error_message = "Упс! Что-то пошло не так с этой кнопкой."
-    elif chat_lang == 'kk':
-        error_message = "Упс! Осы түймемен бірдеңе дұрыс болмады."
-    
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=error_message
-    )
+    # If we get here, we didn't handle the action
+    logger.warning(f"Unhandled button callback action: {action}")
+    await query.answer("Unhandled action / Необработанное действие")
 
 async def post_init(application: Application) -> None:
     """Create DB pool and tables after initialization."""
@@ -1288,7 +1954,10 @@ def main() -> None:
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("history", history_command)) # Added
+    application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("pause", pause_command))
+    application.add_handler(CommandHandler("resume", resume_command))
 
     # Handler for MP3/WAV conversion (Document or Audio)
     application.add_handler(MessageHandler(filters.AUDIO | filters.Document.AUDIO, handle_audio))
@@ -1297,7 +1966,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message)) # Added
 
     # Handler for Callback Queries
-    application.add_handler(CallbackQueryHandler(button_callback_handler)) # Added
+    application.add_handler(CallbackQueryHandler(button_callback)) # Added
 
     logger.info("Starting bot polling...")
     application.run_polling()

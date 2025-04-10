@@ -4,43 +4,74 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-async def create_tables(pool: asyncpg.Pool):
-    """Creates the necessary database tables if they don't exist."""
+async def create_tables(pool: asyncpg.Pool) -> None:
+    """Creates necessary database tables if they don't exist."""
     async with pool.acquire() as connection:
         try:
+            # Summaries table stores voice message transcriptions and summaries
             await connection.execute("""
                 CREATE TABLE IF NOT EXISTS summaries (
                     id SERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL,
                     chat_id BIGINT NOT NULL,
                     original_telegram_message_id BIGINT NOT NULL,
-                    summary_telegram_message_id BIGINT, -- Can be null initially or if sending fails
+                    summary_telegram_message_id BIGINT NOT NULL,
                     telegram_audio_file_id TEXT NOT NULL,
-                    mode VARCHAR(50) NOT NULL, -- e.g., 'brief', 'detailed', 'transcript'
+                    mode TEXT NOT NULL,
+                    transcript_text TEXT NOT NULL,
                     summary_text TEXT,
-                    transcript_text TEXT, -- Store cleaned transcript separately if needed
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                    summary_brief TEXT,
+                    summary_detailed TEXT,
+                    summary_bullet TEXT,
+                    summary_combined TEXT,
+                    summary_pasha TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
             """)
-            # Add index for faster history lookups
+            
+            # Add indexes for faster querying
             await connection.execute("""
-                CREATE INDEX IF NOT EXISTS idx_summaries_user_chat_created ON summaries (user_id, chat_id, created_at DESC);
+                CREATE INDEX IF NOT EXISTS summaries_user_id_idx ON summaries(user_id);
+                CREATE INDEX IF NOT EXISTS summaries_chat_id_idx ON summaries(chat_id);
+                CREATE INDEX IF NOT EXISTS summaries_original_message_id_idx ON summaries(original_telegram_message_id);
+                CREATE INDEX IF NOT EXISTS summaries_created_at_idx ON summaries(created_at);
             """)
-            # Add index for looking up by the bot's message ID (for button callbacks)
+            
+            # Chat preferences for storing chat-specific settings
             await connection.execute("""
-                CREATE INDEX IF NOT EXISTS idx_summaries_summary_message_id ON summaries (summary_telegram_message_id);
+                CREATE TABLE IF NOT EXISTS chat_preferences (
+                    chat_id BIGINT PRIMARY KEY,
+                    default_mode TEXT DEFAULT 'brief',
+                    language TEXT DEFAULT 'ru',
+                    is_paused BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
             """)
-            # Add trigger to update updated_at timestamp
+            
+            # User preferences for storing user-specific settings
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    user_id BIGINT PRIMARY KEY,
+                    language TEXT DEFAULT 'ru',
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            """)
+            
+            # Automatically update 'updated_at' timestamp when records are updated
             await connection.execute("""
                 CREATE OR REPLACE FUNCTION update_updated_at_column()
                 RETURNS TRIGGER AS $$
                 BEGIN
-                   NEW.updated_at = NOW(); 
-                   RETURN NEW;
+                    NEW.updated_at = NOW();
+                    RETURN NEW;
                 END;
-                $$ language 'plpgsql';
+                $$ LANGUAGE 'plpgsql';
             """)
+            
+            # Add the trigger to each table with 'updated_at' column
             await connection.execute("""
                 DROP TRIGGER IF EXISTS update_summaries_updated_at ON summaries;
                 CREATE TRIGGER update_summaries_updated_at
@@ -49,42 +80,35 @@ async def create_tables(pool: asyncpg.Pool):
                 EXECUTE FUNCTION update_updated_at_column();
             """)
             
-            # Create chat_preferences table for storing default mode and language settings
             await connection.execute("""
-                CREATE TABLE IF NOT EXISTS chat_preferences (
-                    chat_id BIGINT PRIMARY KEY,
-                    default_mode VARCHAR(50) NOT NULL,
-                    language VARCHAR(10) NOT NULL DEFAULT 'ru',
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                );
+                DROP TRIGGER IF EXISTS update_chat_preferences_updated_at ON chat_preferences;
+                CREATE TRIGGER update_chat_preferences_updated_at
+                BEFORE UPDATE ON chat_preferences
+                FOR EACH ROW
+                EXECUTE FUNCTION update_updated_at_column();
             """)
             
-            # Добавляем проверку на существование столбца language и добавляем его, если отсутствует
             await connection.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS(
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_name='chat_preferences' AND column_name='language'
-                    ) THEN
-                        ALTER TABLE chat_preferences ADD COLUMN language VARCHAR(10) NOT NULL DEFAULT 'ru';
-                    END IF;
-                END $$;
+                DROP TRIGGER IF EXISTS update_user_preferences_updated_at ON user_preferences;
+                CREATE TRIGGER update_user_preferences_updated_at
+                BEFORE UPDATE ON user_preferences
+                FOR EACH ROW
+                EXECUTE FUNCTION update_updated_at_column();
             """)
             
-            # Create user_preferences table for storing user settings like language
-            await connection.execute("""
-                CREATE TABLE IF NOT EXISTS user_preferences (
-                    user_id BIGINT PRIMARY KEY,
-                    language VARCHAR(10) NOT NULL DEFAULT 'ru',
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                );
-            """)
+            # Add is_paused column if it doesn't exist
+            try:
+                await connection.execute("""
+                    ALTER TABLE chat_preferences 
+                    ADD COLUMN IF NOT EXISTS is_paused BOOLEAN DEFAULT FALSE;
+                """)
+            except Exception as e:
+                logger.warning(f"Error adding is_paused column (likely already exists): {e}")
+
+            logger.info("Database tables created or verified")
             
-            logger.info("Database tables checked/created successfully.")
         except Exception as e:
             logger.error(f"Error creating database tables: {e}", exc_info=True)
-            # Re-raise the exception to potentially halt startup if DB is critical
             raise
 
 async def save_summary(
@@ -276,6 +300,29 @@ async def clear_chat_default_mode(pool: asyncpg.Pool, chat_id: int) -> bool:
         except Exception as e:
             logger.error(f"Error resetting default mode for chat {chat_id}: {e}", exc_info=True)
             return False
+
+async def get_chat_paused_status(pool: asyncpg.Pool, chat_id: int) -> bool:
+    """Gets the paused status for a chat.
+    
+    Args:
+        pool: The database connection pool.
+        chat_id: The Telegram Chat ID.
+        
+    Returns:
+        True if the chat is paused, False otherwise.
+    """
+    async with pool.acquire() as connection:
+        try:
+            is_paused = await connection.fetchval("""
+                SELECT is_paused FROM chat_preferences
+                WHERE chat_id = $1;
+            """, chat_id)
+            
+            # Return True if is_paused is explicitly set to True, otherwise False
+            return is_paused is True
+        except Exception as e:
+            logger.error(f"Error getting paused status for chat {chat_id}: {e}", exc_info=True)
+            return False  # Default to not paused if there's an error
 
 # --- History functions ---
 
