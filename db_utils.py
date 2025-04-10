@@ -233,7 +233,7 @@ async def set_chat_default_mode(pool: asyncpg.Pool, chat_id: int, mode: str) -> 
                 ON CONFLICT (chat_id)
                 DO UPDATE SET default_mode = $2, updated_at = NOW();
             """, chat_id, mode)
-            logger.info(f"Set default mode for chat {chat_id} to '{mode}'")
+            logger.info(f"Set default mode for chat {chat_id} to {mode}")
             return True
         except Exception as e:
             logger.error(f"Error setting default mode for chat {chat_id}: {e}", exc_info=True)
@@ -282,23 +282,6 @@ async def set_chat_language(pool: asyncpg.Pool, chat_id: int, language: str) -> 
             return True
         except Exception as e:
             logger.error(f"Error setting language for chat {chat_id}: {e}", exc_info=True)
-            return False
-
-async def clear_chat_default_mode(pool: asyncpg.Pool, chat_id: int) -> bool:
-    """Clears the default mode setting for a chat."""
-    async with pool.acquire() as connection:
-        try:
-            # Use the system default mode instead of completely removing the record
-            # to preserve other settings like language
-            await connection.execute("""
-                UPDATE chat_preferences
-                SET default_mode = 'brief', updated_at = NOW()
-                WHERE chat_id = $1;
-            """, chat_id)
-            logger.info(f"Reset default mode for chat {chat_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error resetting default mode for chat {chat_id}: {e}", exc_info=True)
             return False
 
 async def get_chat_paused_status(pool: asyncpg.Pool, chat_id: int) -> bool:
@@ -352,9 +335,9 @@ async def get_user_history(pool: asyncpg.Pool, user_id: int, chat_id: int, limit
             if total_count == 0:
                 return [], 0
 
-            # Fetch the paginated records
+            # Fetch the paginated records, including user_id
             records = await connection.fetch("""
-                SELECT id, original_telegram_message_id, summary_telegram_message_id, mode, summary_text, transcript_text, created_at
+                SELECT id, user_id, original_telegram_message_id, summary_telegram_message_id, mode, summary_text, transcript_text, created_at
                 FROM summaries
                 WHERE user_id = $1 AND chat_id = $2
                 ORDER BY created_at DESC

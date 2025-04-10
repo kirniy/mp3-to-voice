@@ -17,7 +17,7 @@ from telegram.helpers import escape_markdown as telegram_escape_markdown # Added
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
-from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, clear_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status # Added get_user_history
+from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status # Added get_user_history
 from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
 
 # Enable logging
@@ -208,7 +208,7 @@ def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineK
             InlineKeyboardButton(redo_label, callback_data=f"redo:{original_msg_id}"),
         ],
         [
-            InlineKeyboardButton(settings_label, callback_data="settings"), # Use the correct callback_data
+            InlineKeyboardButton(settings_label, callback_data=f"settings:{original_msg_id}"), # Include original_msg_id
             InlineKeyboardButton(done_label, callback_data=f"confirm:{original_msg_id}"),
         ]
     ])
@@ -251,7 +251,7 @@ def create_voice_settings_buttons(original_msg_id: int, language: str = 'ru') ->
         ]
     ])
 
-def format_history_message(record: asyncpg.Record, current_index: int, total_count: int, language: str = 'ru') -> str:
+def format_history_message(record: asyncpg.Record, current_index: int, total_count: int, language: str = 'ru', author_name: str = "Unknown User") -> str:
     """Formats a single history record for display using MarkdownV2."""
     # Safely get text, defaulting to an empty string if both are None
     summary = record.get('summary_text', None)
@@ -263,10 +263,11 @@ def format_history_message(record: asyncpg.Record, current_index: int, total_cou
     # Ensure mode_key is a string before using it in .get()
     if not isinstance(mode_key, str):
         mode_key = 'unknown'
-    mode_display = SUPPORTED_MODES.get(mode_key, mode_key) # Get display name or use the key itself
+    # Get localized mode name using the utility function
+    localized_mode_name = get_mode_name(mode_key, language) 
     # Ensure mode_display is a string before escaping
-    if not isinstance(mode_display, str):
-        mode_display = str(mode_display) 
+    if not isinstance(localized_mode_name, str):
+        localized_mode_name = str(localized_mode_name) 
 
     created_at_utc = record['created_at']
     
@@ -274,17 +275,18 @@ def format_history_message(record: asyncpg.Record, current_index: int, total_cou
     created_at_moscow = created_at_utc.astimezone(moscow_tz) if created_at_utc else None # Handle None created_at
     # Ensure time_str is generated safely even if created_at is somehow None
     time_str = escape_markdown(created_at_moscow.strftime('%d.%m.%Y %H:%M МСК'), version=2) if created_at_moscow else "(no date)"
-    escaped_mode = escape_markdown(mode_display, version=2)
+    escaped_mode = escape_markdown(localized_mode_name, version=2)
+    escaped_author = escape_markdown(author_name, version=2)
     
     # Localized header
-    header_text = f"История \\({current_index}/{total_count}\\)"
+    header_text = f"История \({current_index}/{total_count}\)"
     if language == 'en':
-        header_text = f"History \\({current_index}/{total_count}\\)"
+        header_text = f"History \({current_index}/{total_count}\)"
     elif language == 'kk':
-        header_text = f"Тарих \\({current_index}/{total_count}\\)"
+        header_text = f"Тарих \({current_index}/{total_count}\)"
     
-    # Use MarkdownV2 formatting - Bold for heading, italic for mode
-    header = f"*{header_text}* \\| _{escaped_mode}_ \\| {time_str}"
+    # Use MarkdownV2 formatting - Bold for heading, italic for mode and author
+    header = f"*{header_text}* \| _{escaped_mode}_ \| _{escaped_author}_ \| {time_str}"
     
     # Content with proper formatting preservation
     empty_text = "(пусто)"
@@ -304,48 +306,43 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     if total_count <= 0:
         return None
     
-    current_page = (current_offset // page_size) + 1
-    total_pages = (total_count + page_size - 1) // page_size
+    # Since page_size is 1, current_offset is the index
+    current_index = current_offset 
     
     buttons = []
     row = []
     
-    # Previous page button
-    if current_offset > 0:
-        prev_offset = max(0, current_offset - page_size)
-        prev_label = "⬅️ Назад"
-        if language == 'en':
-            prev_label = "⬅️ Back"
-        elif language == 'kk':
-            prev_label = "⬅️ Артқа"
+    # Previous page button (if not the first item)
+    if current_index > 0:
+        prev_offset = current_index - 1
+        prev_label = "⬅️"
+        # if language == 'en': prev_label = "⬅️"
+        # elif language == 'kk': prev_label = "⬅️"
         row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{original_msg_id}:{prev_offset}"))
     else:
         row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
-    # Center button to return to main menu
-    back_to_menu_label = "🔍 Меню"
+    # Center button to return to settings menu
+    back_to_settings_label = "⚙️ Настройки"
     if language == 'en':
-        back_to_menu_label = "🔍 Menu"
+        back_to_settings_label = "⚙️ Settings"
     elif language == 'kk':
-        back_to_menu_label = "🔍 Мәзір"
-    row.append(InlineKeyboardButton(back_to_menu_label, callback_data=f"back_to_main:{original_msg_id}"))
+        back_to_settings_label = "⚙️ Параметрлер"
+    # Corrected callback_data to "settings"
+    row.append(InlineKeyboardButton(back_to_settings_label, callback_data="settings")) 
     
-    # Next page button
-    if current_page < total_pages:
-        next_offset = current_offset + page_size
-        next_label = "➡️ Вперёд"
-        if language == 'en':
-            next_label = "➡️ Next"
-        elif language == 'kk':
-            next_label = "➡️ Алға"
+    # Next page button (if not the last item)
+    if current_index < total_count - 1:
+        next_offset = current_index + 1
+        next_label = "➡️"
+        # if language == 'en': next_label = "➡️"
+        # elif language == 'kk': next_label = "➡️"
         row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{original_msg_id}:{next_offset}"))
     else:
         row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
     buttons.append(row)
     
-    if not buttons:
-        return None
     return InlineKeyboardMarkup(buttons)
 
 # --- Mode Selection and Handling ---
@@ -700,48 +697,61 @@ async def handle_history_navigation(update: Update, context: CallbackContext, da
         await query.answer("Database error / Ошибка базы данных", show_alert=True)
         return
     
+    # Check if data_parts has the expected structure (action, original_msg_id, offset)
     if len(data_parts) < 3:
-        logger.error(f"Invalid history data: {data_parts}")
+        logger.error(f"Invalid history data structure for navigation: {data_parts}")
         await query.answer("Invalid history data / Неверные данные истории", show_alert=True)
         return
     
-    original_msg_id = int(data_parts[1])
-    offset = int(data_parts[2])
+    try:
+        # original_msg_id is needed for button context but not for fetching history
+        original_msg_id = int(data_parts[1]) 
+        offset = int(data_parts[2])
+    except ValueError:
+        logger.error(f"Invalid integer in history navigation data: {data_parts}")
+        await query.answer("Invalid history data format / Неверный формат данных истории", show_alert=True)
+        return
     
     try:
         # Get chat's language
         chat_lang = await get_chat_language(pool, chat_id)
         
-        # Get history records
+        # Get history records (limit=1, offset is the index)
         history_records, total_count = await get_user_history(
             pool, user_id, chat_id, limit=HISTORY_PAGE_SIZE, offset=offset
         )
         
         if not history_records:
-            await query.answer("No history found / История не найдена", show_alert=True)
+            await query.answer("No history found at this position / История не найдена", show_alert=True)
             return
         
-        # Format the history message
-        history_message = ""
+        # Since limit=1, we only care about the first record
+        record = history_records[0]
+        current_index = offset + 1 # Display index is offset + 1
+
+        # Fetch author name
+        author_name = "Unknown User"
+        record_user_id = record.get('user_id')
+        if record_user_id:
+            try:
+                author_chat = await context.bot.get_chat(record_user_id)
+                author_name = author_chat.full_name or author_name
+            except Exception as name_e:
+                logger.warning(f"Could not fetch author name for user_id {record_user_id}: {name_e}")
         
-        for i, record in enumerate(history_records, 1):
-            current_index = offset + i
-            formatted_entry = format_history_message(
-                record, current_index, total_count, chat_lang
-            )
-            history_message += formatted_entry
-            
-            # Add separator between entries
-            if i < len(history_records):
-                history_message += "\n\n" + "—" * 20 + "\n\n"
+        # Format the single history message, passing the author name
+        history_message = format_history_message(
+            record, current_index, total_count, chat_lang, author_name=author_name
+        )
         
-        # Create pagination buttons
+        # Create pagination buttons (original_msg_id is needed for context in buttons)
         reply_markup = create_history_pagination_buttons(original_msg_id, offset, total_count, HISTORY_PAGE_SIZE, chat_lang)
         
-        # Update the message
+        # Update the message with MarkdownV2
         await query.edit_message_text(
             history_message,
             reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN_V2 # Re-enable MarkdownV2
         )
         
         logger.info(f"Updated history view for user {user_id} to offset {offset}")
@@ -1085,11 +1095,11 @@ async def pause_command(update: Update, context: CallbackContext) -> None:
     async with pool.acquire() as connection:
         try:
             await connection.execute("""
-                INSERT INTO chat_preferences (chat_id, is_paused, updated_at)
-                VALUES ($1, TRUE, NOW())
+                INSERT INTO chat_preferences (chat_id, default_mode, is_paused, updated_at)
+                VALUES ($1, $2, TRUE, NOW())
                 ON CONFLICT (chat_id)
                 DO UPDATE SET is_paused = TRUE, updated_at = NOW();
-            """, chat.id)
+            """, chat.id, DEFAULT_MODE) # Add DEFAULT_MODE here
             
             await update.message.reply_text(
                 get_string('pause_success', chat_lang),
@@ -1118,11 +1128,11 @@ async def resume_command(update: Update, context: CallbackContext) -> None:
     async with pool.acquire() as connection:
         try:
             await connection.execute("""
-                INSERT INTO chat_preferences (chat_id, is_paused, updated_at)
-                VALUES ($1, FALSE, NOW())
+                INSERT INTO chat_preferences (chat_id, default_mode, is_paused, updated_at)
+                VALUES ($1, $2, FALSE, NOW())
                 ON CONFLICT (chat_id)
                 DO UPDATE SET is_paused = FALSE, updated_at = NOW();
-            """, chat.id)
+            """, chat.id, DEFAULT_MODE) # Add DEFAULT_MODE here
             
             await update.message.reply_text(
                 get_string('resume_success', chat_lang),
@@ -1299,7 +1309,7 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
                 InlineKeyboardButton(redo_label, callback_data=f"redo:{message.message_id}"),
             ],
             [
-                InlineKeyboardButton(settings_label, callback_data="settings"), # Use the correct callback_data
+                InlineKeyboardButton(settings_label, callback_data=f"settings:{message.message_id}"), # Include original_msg_id
                 InlineKeyboardButton(done_label, callback_data=f"confirm:{message.message_id}"),
             ]
         ]
@@ -1376,16 +1386,17 @@ async def button_callback(update: Update, context: CallbackContext):
             await query.answer("Invalid callback data", show_alert=True)
             return
         
-        # Parse offset parameter
+        # Parse offset parameter (default to 0 if missing or invalid)
         try:
-            offset = int(data_parts[1])
+            offset = int(data_parts[1]) if len(data_parts) > 1 else 0
         except ValueError:
-            await query.answer("Invalid offset value", show_alert=True)
-            return
+            offset = 0
+            logger.warning(f"Invalid offset value in show_command_history data: {data_parts}, defaulting to 0")
         
         # Get user history
         user_id = update.effective_user.id
-        limit = 5  # Number of history items per page
+        # limit = 5  # Number of history items per page -> Now uses HISTORY_PAGE_SIZE
+        limit = HISTORY_PAGE_SIZE 
         
         try:
             # Fetch user history from database
@@ -1401,86 +1412,50 @@ async def button_callback(update: Update, context: CallbackContext):
                 elif chat_lang == 'kk':
                     no_history_message = "Сізде әлі дауыстық хабарлама тарихы жоқ."
                 
+                # Create a simple back button if no history
+                no_history_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Назад к настройкам" if chat_lang == 'ru' else "⬅️ Back to Settings", callback_data="settings")]
+                ])
                 await query.edit_message_text(
                     no_history_message,
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("⬅️ Back", callback_data="settings")]
-                    ])
+                    reply_markup=no_history_keyboard
                 )
                 await query.answer()
                 return
             
-            # Format history message
-            history_message = ""
+            # Format history message (only the first record since limit=1)
+            record = history_records[0]
+            current_index = offset + 1
+
+            # Fetch author name
+            author_name = "Unknown User"
+            record_user_id = record.get('user_id')
+            if record_user_id:
+                try:
+                    author_chat = await context.bot.get_chat(record_user_id)
+                    author_name = author_chat.full_name or author_name
+                except Exception as name_e:
+                    logger.warning(f"Could not fetch author name for user_id {record_user_id}: {name_e}")
             
-            for i, record in enumerate(history_records, 1):
-                current_index = offset + i
-                formatted_entry = format_history_message(
-                    record, current_index, total_count, chat_lang
-                )
-                history_message += formatted_entry
-                
-                # Add separator between entries
-                if i < len(history_records):
-                    history_message += "\n\n" + "—" * 20 + "\n\n"
+            history_message = format_history_message(
+                record, current_index, total_count, chat_lang, author_name=author_name
+            )
             
-            # Create pagination buttons
-            buttons = []
+            # Create pagination buttons (pass original message ID if available, else maybe 0 or handle differently?)
+            # We don't have original_msg_id here, as this is from settings menu.
+            # Let's pass the current message_id being edited.
+            current_message_id = query.message.message_id if query.message else 0
+            reply_markup = create_history_pagination_buttons(current_message_id, offset, total_count, limit, chat_lang)
             
-            # Previous page button
-            if offset > 0:
-                prev_offset = max(0, offset - limit)
-                prev_text = "⬅️ Previous"
-                if chat_lang == 'ru':
-                    prev_text = "⬅️ Предыдущие"
-                elif chat_lang == 'kk':
-                    prev_text = "⬅️ Алдыңғы"
-                buttons.append(
-                    InlineKeyboardButton(
-                        prev_text, 
-                        callback_data=f"show_command_history:{prev_offset}"
-                    )
-                )
-            
-            # Next page button
-            if offset + limit < total_count:
-                next_offset = offset + limit
-                next_text = "Next ➡️"
-                if chat_lang == 'ru':
-                    next_text = "Следующие ➡️"
-                elif chat_lang == 'kk':
-                    next_text = "Келесі ➡️"
-                buttons.append(
-                    InlineKeyboardButton(
-                        next_text, 
-                        callback_data=f"show_command_history:{next_offset}"
-                    )
-                )
-            
-            # If we have both previous and next buttons, put them on the same row
-            pagination_row = []
-            if buttons:
-                pagination_row = [buttons]
-            
-            # Add back button
-            back_text = "⬅️ Back to Settings"
-            if chat_lang == 'ru':
-                back_text = "⬅️ Назад к настройкам"
-            elif chat_lang == 'kk':
-                back_text = "⬅️ Параметрлерге оралу"
-            
-            keyboard = pagination_row + [
-                [InlineKeyboardButton(back_text, callback_data="settings")]
-            ]
-            
-            # Update the message with history and pagination buttons
+            # Update the message with history and pagination buttons, using MarkdownV2
             await query.edit_message_text(
                 history_message,
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.MARKDOWN_V2
             )
             
         except Exception as e:
-            logger.error(f"Error displaying history: {str(e)}")
+            logger.error(f"Error displaying history: {str(e)}", exc_info=True)
             error_message = "Error retrieving history. Please try again later."
             if chat_lang == 'ru':
                 error_message = "Ошибка при получении истории. Пожалуйста, попробуйте позже."
@@ -1581,12 +1556,21 @@ async def button_callback(update: Update, context: CallbackContext):
         return
     
     elif action == "settings":
+        # Check if the settings menu was opened from a message
+        original_msg_id = None
+        if len(data_parts) > 1:
+            try:
+                original_msg_id = int(data_parts[1])
+            except (ValueError, TypeError):
+                original_msg_id = None
+        
         # Localize menu options
         lang_btn_text = "🌐 Change Language"
         history_btn_text = "📚 History"
         sub_btn_text = "💰 Subscription Info"
         mode_btn_text = "⚙️ Default Mode"
         close_btn_text = "❌ Close"
+        back_to_msg_text = "⬅️ Back to Message"
         
         if chat_lang == 'ru':
             lang_btn_text = "🌐 Изменить язык"
@@ -1594,20 +1578,28 @@ async def button_callback(update: Update, context: CallbackContext):
             sub_btn_text = "💰 Информация о подписке"
             mode_btn_text = "⚙️ Выбор режима"
             close_btn_text = "❌ Закрыть"
+            back_to_msg_text = "⬅️ Назад к сообщению"
         elif chat_lang == 'kk':
             lang_btn_text = "🌐 Тілді өзгерту"
             history_btn_text = "📚 Тарих"
             sub_btn_text = "💰 Жазылым туралы ақпарат"
             mode_btn_text = "⚙️ Әдепкі режим"
             close_btn_text = "❌ Жабу"
+            back_to_msg_text = "⬅️ Хабарламаға оралу"
         
         keyboard = [
             [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
             [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
             [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
             [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
-            [InlineKeyboardButton(close_btn_text, callback_data="close_settings")]
         ]
+        
+        # Add "Back to Message" button if opened from a message
+        if original_msg_id is not None:
+            keyboard.append([InlineKeyboardButton(back_to_msg_text, callback_data=f"back_to_message:{original_msg_id}")])
+        
+        # Add close button
+        keyboard.append([InlineKeyboardButton(close_btn_text, callback_data="close_settings")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -1813,7 +1805,7 @@ async def button_callback(update: Update, context: CallbackContext):
     
     # For original message callbacks, ensure we have the original_msg_id
     if action in ["confirm", "mode_select", "mode_set", "redo", "history", "history_nav", 
-                  "set_default_mode", "cancel_mode_select", "show_pin_menu"]:
+                  "set_default_mode", "cancel_mode_select", "show_pin_menu", "back_to_message"]:
         if len(data_parts) < 2:
             await query.answer("Missing message ID", show_alert=True)
             return
@@ -1889,6 +1881,58 @@ async def button_callback(update: Update, context: CallbackContext):
         elif action == "cancel_mode_select":
             # Return to normal action buttons
             await query.edit_message_reply_markup(reply_markup=create_action_buttons(original_msg_id, chat_lang))
+            return
+            
+        elif action == "back_to_message":
+            if len(data_parts) < 2:
+                await query.answer("Missing message ID", show_alert=True)
+                return
+                
+            try:
+                original_msg_id = int(data_parts[1])
+            except (ValueError, TypeError):
+                await query.answer("Invalid message ID", show_alert=True)
+                return
+            
+            # Get the record from the database to retrieve mode and transcript
+            db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
+            if not db_record:
+                logger.error(f"Record not found for message {original_msg_id}")
+                await query.answer("Could not find the original message", show_alert=True)
+                return
+                
+            # Re-create the original message with action buttons
+            try:
+                # Similar to what we do in mode_set - format the message
+                user_id = db_record['user_id']
+                mode = db_record['mode']
+                display_text = db_record['summary_text'] if db_record['summary_text'] else db_record['transcript_text']
+                
+                # Get user info for the header
+                original_user = await context.bot.get_chat(user_id)
+                original_date = query.message.date  # Use current date as fallback
+                
+                # Format message header
+                moscow_tz = pytz.timezone('Europe/Moscow')
+                moscow_time = original_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+                moscow_time_str = escape_markdown(moscow_time, version=2)
+                user_name = escape_markdown(original_user.full_name, version=2)
+                header = f"*{user_name}* \\| {moscow_time_str}"
+                
+                # Format the display text with markdown
+                escaped_display_text = escape_markdown_preserve_formatting(display_text)
+                final_text = f"{header}\n\n{escaped_display_text}"
+                
+                # Edit message with original action buttons
+                await query.edit_message_text(
+                    final_text,
+                    reply_markup=create_action_buttons(original_msg_id, chat_lang),
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            except Exception as e:
+                logger.error(f"Error returning to message {original_msg_id}: {e}", exc_info=True)
+                await query.answer("Error returning to message", show_alert=True)
+            
             return
     
     # If we get here, we didn't handle the action
