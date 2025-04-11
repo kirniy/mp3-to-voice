@@ -29,7 +29,8 @@ STRINGS = {
         'history_export_error': "❌ Error generating history export.",
         'diagram_error_data': "❌ Error generating diagram data from transcript.",
         'diagram_error_syntax': "❌ Error creating diagram syntax.",
-        'diagram_error_render': "❌ Error rendering diagram image."
+        'diagram_error_render': "❌ Error rendering diagram image.",
+        'history_delete_all_confirm': "Are you sure you want to delete the ENTIRE chat history? This action is irreversible.",
     },
     'ru': {
         'choose_language': "Пожалуйста, выберите ваш язык:",
@@ -61,7 +62,8 @@ STRINGS = {
         'history_export_error': "❌ Ошибка при генерации экспорта истории.",
         'diagram_error_data': "❌ Ошибка генерации данных для диаграммы из транскрипции.",
         'diagram_error_syntax': "❌ Ошибка создания синтаксиса диаграммы.",
-        'diagram_error_render': "❌ Ошибка рендеринга изображения диаграммы."
+        'diagram_error_render': "❌ Ошибка рендеринга изображения диаграммы.",
+        'history_delete_all_confirm': "Вы уверены, что хотите удалить ВСЮ историю чата? Это действие необратимо.",
     },
     'kk': {
         'choose_language': "Тілді таңдаңыз:",
@@ -93,7 +95,8 @@ STRINGS = {
         'history_export_error': "❌ Тарих экспортын жасау кезінде қате.",
         'diagram_error_data': "❌ Транскрипциядан диаграмма деректерін жасау қатесі.",
         'diagram_error_syntax': "❌ Диаграмма синтаксисін жасау қатесі.",
-        'diagram_error_render': "❌ Диаграмма кескінін көрсету қатесі."
+        'diagram_error_render': "❌ Диаграмма кескінін көрсету қатесі.",
+        'history_delete_all_confirm': "Сіз чаттың БАРЛЫҚ тарихын жойғыңыз келетініне сенімдісіз бе? Бұл әрекет қайтарымсыз.",
     }
 }
 

@@ -10,8 +10,8 @@ import pytz # Added
 from datetime import datetime # Added
 import re
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup # Added
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message # Added
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler, ContextTypes
 from telegram.constants import ChatAction, ParseMode # Added ParseMode
 from telegram.helpers import escape_markdown as telegram_escape_markdown # Added for V2, renamed to avoid confusion
 
@@ -217,39 +217,26 @@ def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineK
 
 # --- History Formatting Helpers ---
 
-def create_voice_settings_buttons(original_msg_id: int, language: str = 'ru') -> InlineKeyboardMarkup:
+async def create_voice_settings_buttons(original_msg_id: int, language: str = 'ru') -> InlineKeyboardMarkup:
     """Creates the settings buttons for voice message responses."""
     # Localize button labels
-    language_label = "🌐 Язык"
-    history_label = "📚 История"
-    mode_label = "⚙️ Режим"
-    subscription_label = "💰 Подписка"
-    back_label = "⬅️ Назад"
+    lang_btn_text = get_string('settings_language', language)
+    history_btn_text = get_string('settings_history', language)
+    mode_btn_text = get_string('settings_mode', language)
+    sub_btn_text = get_string('settings_subscription', language)
+    back_btn_text = get_string('button_back', language)
     
-    if language == 'en':
-        language_label = "🌐 Language"
-        history_label = "📚 History"
-        mode_label = "⚙️ Mode"
-        subscription_label = "💰 Subscription"
-        back_label = "⬅️ Back"
-    elif language == 'kk':
-        language_label = "🌐 Тіл"
-        history_label = "📚 Тарих"
-        mode_label = "⚙️ Режим"
-        subscription_label = "💰 Жазылым"
-        back_label = "⬅️ Артқа"
-        
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(language_label, callback_data=f"voice_language_menu:{original_msg_id}"),
-            InlineKeyboardButton(mode_label, callback_data=f"mode_select:{original_msg_id}"),
+            InlineKeyboardButton(lang_btn_text, callback_data=f"voice_language_menu:{original_msg_id}"),
+            InlineKeyboardButton(mode_btn_text, callback_data=f"mode_select:{original_msg_id}"), # Mode selection for this message
         ],
         [
-            InlineKeyboardButton(history_label, callback_data=f"history:{original_msg_id}:0"),
-            InlineKeyboardButton(subscription_label, callback_data=f"voice_subscription_info:{original_msg_id}"),
+            InlineKeyboardButton(history_btn_text, callback_data=f"history:{original_msg_id}:0"),
+            InlineKeyboardButton(sub_btn_text, callback_data=f"voice_subscription_info:{original_msg_id}"),
         ],
         [
-            InlineKeyboardButton(back_label, callback_data=f"back_to_main:{original_msg_id}")
+            InlineKeyboardButton(back_btn_text, callback_data=f"back_to_main:{original_msg_id}") # Back to main action buttons
         ]
     ])
 
@@ -303,11 +290,21 @@ def format_history_message(record: asyncpg.Record, current_index: int, total_cou
     # Don't use code block to allow formatting to be visible
     return f"{header}\n\n{escaped_text}"
 
-def create_history_pagination_buttons(original_msg_id: int, current_offset: int, total_count: int, page_size: int, language: str = 'ru') -> InlineKeyboardMarkup | None:
-    """Creates buttons for history pagination, including delete and export."""
-    if total_count <= 0:
-        # Still provide delete/export options even if history is empty
-        pass # Continue to create buttons
+def create_history_pagination_buttons(context_message_id: int, current_offset: int, total_count: int, page_size: int, language: str = 'ru', from_settings_menu: bool = False) -> InlineKeyboardMarkup | None:
+    """Creates buttons for history pagination, including delete and export.
+    
+    Args:
+        context_message_id: The ID of the message context (original voice msg or settings msg).
+        current_offset: The current offset in the history.
+        total_count: Total number of history records.
+        page_size: Number of items per page (currently 1).
+        language: The chat language.
+        from_settings_menu: True if called from the main settings menu, False otherwise.
+    """
+    if total_count <= 0 and not from_settings_menu:
+        # Only show delete/export if NOT from settings and history is empty?
+        # Let's adjust: Always show nav row if possible, show actions only if not from_settings
+        pass # Continue below
 
     # Since page_size is 1, current_offset is the index
     current_index = current_offset 
@@ -319,38 +316,41 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     if current_index > 0:
         prev_offset = current_index - 1
         prev_label = "⬅️"
-        nav_row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{original_msg_id}:{prev_offset}"))
+        nav_row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{context_message_id}:{prev_offset}"))
     else:
         nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
     # Center button to return to settings menu (localize label later if needed)
-    back_to_settings_label = "⚙️ Настройки"
-    if language == 'en':
-        back_to_settings_label = "⚙️ Settings"
-    elif language == 'kk':
-        back_to_settings_label = "⚙️ Параметрлер"
-    # Ensure callback_data is just "settings", not dependent on msg_id
-    nav_row.append(InlineKeyboardButton(back_to_settings_label, callback_data="settings")) 
+    # Distinguish between back_to_main (voice context) and settings (main context)
+    if from_settings_menu:
+        back_label = get_string('settings_title', language)
+        back_callback = "settings" # Go back to main settings
+    else:
+        back_label = get_string('button_back', language)
+        back_callback = f"back_to_main:{context_message_id}" # Go back to voice msg buttons
+
+    nav_row.append(InlineKeyboardButton(back_label, callback_data=back_callback)) 
     
     # Next page button (if not the last item)
     if total_count > 0 and current_index < total_count - 1:
         next_offset = current_index + 1
         next_label = "➡️"
-        nav_row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{original_msg_id}:{next_offset}"))
+        nav_row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{context_message_id}:{next_offset}"))
     else:
         nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
     
     buttons.append(nav_row)
 
-    # Add Delete and Export buttons in a new row
-    action_row = []
-    delete_label = get_string('history_delete', language)
-    export_label = get_string('history_export', language)
-    
-    # Note: Using original_msg_id in callback data for context, though not strictly necessary for the action itself
-    action_row.append(InlineKeyboardButton(delete_label, callback_data=f"delete_history_confirm:{original_msg_id}:{current_offset}")) # Include offset for cancel
-    action_row.append(InlineKeyboardButton(export_label, callback_data=f"export_history:{original_msg_id}"))
-    buttons.append(action_row)
+    # Conditionally add Delete and Export buttons
+    if not from_settings_menu:
+        action_row = []
+        delete_label = get_string('history_delete', language)
+        export_label = get_string('history_export', language)
+        
+        # Use context_message_id here
+        action_row.append(InlineKeyboardButton(delete_label, callback_data=f"delete_history_confirm:{context_message_id}:{current_offset}")) # Include offset for cancel
+        action_row.append(InlineKeyboardButton(export_label, callback_data=f"export_history:{context_message_id}"))
+        buttons.append(action_row)
     
     return InlineKeyboardMarkup(buttons)
 
@@ -474,97 +474,265 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
     chat_lang = await get_chat_language(pool, chat_id)
     
     localized_mode_name = get_mode_name(new_mode, chat_lang)
-    switching_msg = f"⏳ Switching to '{localized_mode_name}'..." # Simplified example
-    await query.edit_message_text(switching_msg, reply_markup=None)
+    # Use query.answer for quick feedback, edit message later
+    await query.answer(f"⏳ Switching to '{localized_mode_name}'...")
 
     try:
         db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
         
         if not db_record:
-            logger.error(f"Record not found...")
-            error_buttons = create_action_buttons(original_msg_id, chat_lang)
-            await query.edit_message_text(get_string('error_record_not_found', chat_lang), reply_markup=error_buttons)
+            logger.error(f"Record not found for original message {original_msg_id} during mode set")
+            await query.edit_message_text(
+                get_string('error_record_not_found', chat_lang),
+                reply_markup=create_action_buttons(original_msg_id, chat_lang) # Show buttons again
+            )
             return
         
         record_id = db_record['id']
         audio_file_id = db_record['telegram_audio_file_id']
         user_id = db_record['user_id']
-        transcript_text = db_record['transcript_text']
-        
+        transcript_text = db_record['transcript_text'] # Keep original transcript
+        current_summary_msg_id = db_record['summary_telegram_message_id'] # Get current summary msg id
+
+        # Fetch user/time info for header (consistent across modes)
         original_user = await context.bot.get_chat(user_id)
-        original_message_date = query.message.date
+        # Use DB timestamp if available, else query message date
+        original_message_date = db_record.get('created_at') or query.message.date
         moscow_tz = pytz.timezone('Europe/Moscow')
         moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
         moscow_time_str = escape_markdown(moscow_time, version=2)
         user_name = escape_markdown(original_user.full_name, version=2)
         header = f"*{user_name}* \\| {moscow_time_str}"
+        # Create standard action buttons
         reply_markup = create_action_buttons(original_msg_id, chat_lang)
+        
+        # Show processing indicator by editing the *current* summary message
+        processing_text = f"⏳ Generating {localized_mode_name}..."
+        if chat_lang == 'ru': processing_text = f"⏳ Генерирую {localized_mode_name}..."
+        elif chat_lang == 'kk': processing_text = f"⏳ {localized_mode_name} жасалуда..."
+        try:
+            # Edit the existing message (text or photo caption)
+            await context.bot.edit_message_caption(
+                 chat_id=chat_id, message_id=current_summary_msg_id, caption=processing_text
+            )
+        except Exception: # Try editing as text if caption edit fails
+             try:
+                  await context.bot.edit_message_text(
+                       processing_text, chat_id=chat_id, message_id=current_summary_msg_id
+                  )
+             except Exception as edit_err:
+                  logger.warning(f"Could not edit message {current_summary_msg_id} for mode set status: {edit_err}")
+                  # Proceed anyway
+
+        # --- Re-download and process audio ---
+        summary_text = None
+        new_transcript_text = transcript_text # Start with existing transcript
+        mermaid_code_body = None # For diagram mode saving
+        diagram_png = None # For diagram mode sending
+
+        with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
+            try:
+                file = await context.bot.get_file(audio_file_id)
+                await file.download_to_drive(custom_path=temp_audio_file.name)
+                logger.info(f"Re-downloaded audio {audio_file_id} for mode change to {new_mode}.")
+                
+                # Process with Gemini (only gets summary/transcript here)
+                # Diagram-specific generation happens later if needed
+                summary_text, updated_transcript = await process_audio_with_gemini(temp_audio_file.name, new_mode, chat_lang)
+                if updated_transcript: # Update transcript if Gemini provided a new one
+                    new_transcript_text = updated_transcript
+                    
+            except Exception as audio_err:
+                 logger.error(f"Failed to download/process audio for mode set: {audio_err}", exc_info=True)
+                 await context.bot.edit_message_text(
+                      get_string('error', chat_lang), chat_id=chat_id, message_id=current_summary_msg_id,
+                      reply_markup=reply_markup # Add buttons back on error
+                 )
+                 return
 
         # --- Handle Diagram Mode --- 
         if new_mode == 'diagram':
-            logger.info(f"Switching to diagram mode...")
-            if not transcript_text:
-                 await query.edit_message_text(get_string('error', chat_lang), reply_markup=reply_markup)
+            logger.info(f"Switching to diagram mode for original message {original_msg_id}...")
+            
+            if not new_transcript_text: # Need transcript for diagrams
+                 logger.error("Transcript missing, cannot generate diagram.")
+                 await context.bot.edit_message_text(
+                      get_string('error', chat_lang), chat_id=chat_id, message_id=current_summary_msg_id,
+                      reply_markup=reply_markup
+                 )
                  return
-            diagram_data = await generate_diagram_data(transcript_text, chat_lang)
-            if not diagram_data:
-                 await query.edit_message_text(f"{header}\n\n{escape_markdown_preserve_formatting(get_string('diagram_error_data', chat_lang))}", reply_markup=reply_markup, parse_mode='MarkdownV2')
-                 return
-            mermaid_syntax = create_mermaid_syntax(diagram_data)
-            if not mermaid_syntax:
-                 await query.edit_message_text(f"{header}\n\n{escape_markdown_preserve_formatting(get_string('diagram_error_syntax', chat_lang))}", reply_markup=reply_markup, parse_mode='MarkdownV2')
-                 return
-            png_bytes = render_mermaid_to_png(mermaid_syntax)
-            if not png_bytes:
-                 await query.edit_message_text(f"{header}\n\n{escape_markdown_preserve_formatting(get_string('diagram_error_render', chat_lang))}", reply_markup=reply_markup, parse_mode='MarkdownV2')
-                 return
-            try:
-                await query.message.delete()
-                sent_message = await context.bot.send_photo(chat_id=chat_id, photo=png_bytes, caption=header, parse_mode='MarkdownV2', reply_markup=reply_markup, reply_to_message_id=original_msg_id)
-                logger.info(f"Sent new diagram message...")
-                await update_summary_mode_and_text(pool=pool, record_id=record_id, new_mode=new_mode, new_summary_text=mermaid_syntax, new_transcript_text=transcript_text, new_summary_message_id=sent_message.message_id)
-            except Exception as send_photo_e:
-                logger.error(f"Failed to send diagram photo...: {send_photo_e}", exc_info=True)
-                await context.bot.send_message(chat_id, get_string('error', chat_lang), reply_to_message_id=original_msg_id)
-            # No return here, falls through to the end of the main try block
 
-        # --- Handle Text Modes --- 
-        else: 
-            summary_text = None
-            with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
-                 file = await context.bot.get_file(audio_file_id)
-                 await file.download_to_drive(custom_path=temp_audio_file.name)
-                 logger.info(f"Re-downloaded audio for mode change to {new_mode}.")
-                 summary_text, new_transcript = await process_audio_with_gemini(temp_audio_file.name, new_mode, chat_lang)
-                 if new_transcript:
-                     transcript_text = new_transcript
+            # Generate diagram data and render PNG
+            author_name = original_user.full_name # Use already fetched name
+            try:
+                diagram_data = await generate_diagram_data(new_transcript_text, chat_lang, author_name)
+                if not diagram_data:
+                    raise ValueError(get_string('diagram_error_data', chat_lang))
+                    
+                mermaid_code_body = create_mermaid_syntax(diagram_data, chat_lang)
+                if mermaid_code_body is None:
+                    raise ValueError(get_string('diagram_error_syntax', chat_lang))
+                    
+                diagram_png = render_mermaid_to_png(mermaid_code_body, diagram_data, chat_lang)
+                if not diagram_png:
+                    raise ValueError(get_string('diagram_error_render', chat_lang))
+
+                # Successfully generated diagram
+                logger.info(f"Diagram generated successfully for original message {original_msg_id}.")
+
+            except Exception as diagram_err:
+                logger.error(f"Error generating diagram: {diagram_err}", exc_info=True)
+                error_message = str(diagram_err) if isinstance(diagram_err, ValueError) else get_string('error', chat_lang)
+                # Edit the *original* message back to show the error
+                try:
+                    await context.bot.edit_message_text(
+                        f"{header}\n\n{escape_markdown_preserve_formatting(error_message)}",
+                        chat_id=chat_id, message_id=current_summary_msg_id,
+                        reply_markup=reply_markup, parse_mode='MarkdownV2'
+                    )
+                except Exception: # If editing as text fails (was photo), try editing caption
+                     try:
+                          await context.bot.edit_message_caption(
+                               chat_id=chat_id, message_id=current_summary_msg_id,
+                               caption=f"{header}\n\n{escape_markdown_preserve_formatting(error_message)}",
+                               reply_markup=reply_markup, parse_mode='MarkdownV2'
+                          )
+                     except Exception as final_edit_err:
+                          logger.error(f"Failed to edit message/caption to show diagram error: {final_edit_err}")
+                return
+
+            # --- Send Diagram (Delete old message, send new photo) ---
+            new_summary_message = None
+            try:
+                # Delete the previous message (text or photo)
+                await context.bot.delete_message(chat_id=chat_id, message_id=current_summary_msg_id)
+                logger.info(f"Deleted previous message {current_summary_msg_id}")
+
+                # Send the new photo message, replying to the *original voice message*
+                new_summary_message = await context.bot.send_photo(
+                    chat_id=chat_id,
+                    photo=diagram_png,
+                    caption=header,
+                    parse_mode='MarkdownV2',
+                    reply_markup=reply_markup,
+                    reply_to_message_id=original_msg_id # Reply to the voice message
+                )
+                logger.info(f"Sent new diagram message {new_summary_message.message_id} replying to {original_msg_id}")
+
+                # Update DB with the NEW message ID and mermaid code
+                await update_summary_mode_and_text(
+                    pool=pool,
+                    record_id=record_id,
+                    new_mode=new_mode,
+                    new_summary_text=mermaid_code_body, # Save mermaid code
+                    new_transcript_text=new_transcript_text,
+                    new_summary_message_id=new_summary_message.message_id # IMPORTANT: Update message ID
+                )
+
+            except Exception as send_err:
+                logger.error(f"Error deleting old message or sending new diagram: {send_err}", exc_info=True)
+                # Try to send a text error message as a fallback
+                await context.bot.send_message(
+                     chat_id=chat_id,
+                     text=f"{header}\n\n{escape_markdown_preserve_formatting(get_string('error', chat_lang))}",
+                     reply_to_message_id=original_msg_id, # Reply to original voice message
+                     parse_mode='MarkdownV2'
+                 )
+                # We might have a dangling record with the old message ID here. Difficult to recover fully.
+            return # Finished diagram mode switch
+
+        # --- Handle Text Modes ---
+        else:
+            logger.info(f"Switching to text mode '{new_mode}' for original message {original_msg_id}...")
+            
+            # Determine display text for text modes
             if new_mode == 'as_is' or new_mode == 'transcript':
-                 display_text = transcript_text
-            else:
-                 if not summary_text:
-                     await query.edit_message_text(get_string('error_generating_summary', chat_lang), reply_markup=reply_markup)
-                     return 
-                 display_text = summary_text
+                display_text = new_transcript_text
+            else: # brief, detailed, bullet, combined, pasha
+                display_text = summary_text
+
+            if display_text is None: # Should have transcript at least
+                logger.error(f"Error: No content generated for text mode {new_mode}")
+                await context.bot.edit_message_text(
+                    get_string('error', chat_lang), chat_id=chat_id, message_id=current_summary_msg_id,
+                    reply_markup=reply_markup # Add buttons back
+                )
+                return
+
             escaped_display_text = escape_markdown_preserve_formatting(display_text)
             final_text = f"{header}\n\n{escaped_display_text}"
+
+            # --- Edit Message (Text or Photo Caption) ---
             try:
-                 await query.edit_message_text(final_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
-                 await update_summary_mode_and_text(pool=pool, record_id=record_id, new_mode=new_mode, new_summary_text=summary_text, new_transcript_text=transcript_text, new_summary_message_id=query.message.message_id)
-                 logger.info(f"Successfully updated summary to mode {new_mode}...")
-            except Exception as edit_text_e:
-                  logger.error(f"Failed to edit text message...: {edit_text_e}", exc_info=True)
-                  try:
-                       await query.edit_message_text(get_string('error', chat_lang), reply_markup=reply_markup)
-                  except Exception: 
-                       pass
-            # No return here, falls through to the end of the main try block
+                # Try editing as a text message first
+                await context.bot.edit_message_text(
+                    final_text,
+                    chat_id=chat_id,
+                    message_id=current_summary_msg_id,
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+                logger.info(f"Edited text message {current_summary_msg_id} for mode {new_mode}")
+
+            except Exception: # If that fails, assume it was a photo and try editing caption
+                try:
+                    await context.bot.edit_message_caption(
+                        chat_id=chat_id,
+                        message_id=current_summary_msg_id,
+                        caption=final_text,
+                        reply_markup=reply_markup,
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+                    logger.info(f"Edited photo caption {current_summary_msg_id} for mode {new_mode}")
+                except Exception as edit_err:
+                    logger.error(f"Failed to edit message text or caption for mode {new_mode}: {edit_err}", exc_info=True)
+                    # If editing caption fails, the message might have been deleted or is not a photo.
+                    # Try sending a new text message as a robust fallback.
+                    try:
+                        new_summary_message = await context.bot.send_message(
+                            chat_id=chat_id,
+                            text=final_text,
+                            reply_to_message_id=original_msg_id,
+                            reply_markup=reply_markup,
+                            parse_mode=ParseMode.MARKDOWN_V2
+                        )
+                        logger.info(f"Sent new text message {new_summary_message.message_id} as fallback for mode {new_mode}")
+                        # Update DB with the NEW message ID
+                        await update_summary_mode_and_text(
+                             pool=pool, record_id=record_id, new_mode=new_mode,
+                             new_summary_text=summary_text, new_transcript_text=new_transcript_text,
+                             new_summary_message_id=new_summary_message.message_id
+                        )
+                        return # Successfully sent fallback message
+                    except Exception as send_fallback_err:
+                         logger.error(f"Failed to send fallback text message for mode {new_mode}: {send_fallback_err}")
+                         # At this point, recovery is difficult. Log and return.
+                         return
+
+            # If editing text or caption succeeded, update DB keeping the *existing* message ID
+            await update_summary_mode_and_text(
+                pool=pool,
+                record_id=record_id,
+                new_mode=new_mode,
+                new_summary_text=summary_text, # Save the specific summary for the mode
+                new_transcript_text=new_transcript_text,
+                new_summary_message_id=current_summary_msg_id # IMPORTANT: Keep existing message ID
+            )
+            logger.info(f"Successfully updated summary record {record_id} to text mode {new_mode}")
 
     except Exception as e:
-        logger.error(f"Error in mode_set (mode: {new_mode}): {e}", exc_info=True)
+        logger.error(f"General error in mode_set (mode: {new_mode}, original_msg: {original_msg_id}): {e}", exc_info=True)
         try:
-            # General fallback error message edit
+            # General fallback: Try to edit the message to show an error
             error_buttons = create_action_buttons(original_msg_id, chat_lang)
-            await query.edit_message_text(get_string('error', chat_lang), reply_markup=error_buttons)
+            # Use current_summary_msg_id if available, else query message id
+            msg_id_to_edit = current_summary_msg_id if 'current_summary_msg_id' in locals() else query.message.message_id
+            await context.bot.edit_message_text(
+                get_string('error', chat_lang),
+                chat_id=chat_id,
+                message_id=msg_id_to_edit,
+                reply_markup=error_buttons
+            )
         except Exception as final_edit_e:
             logger.error(f"Failed to edit message after main error in mode_set: {final_edit_e}")
 
@@ -986,34 +1154,45 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         
         if mode == "diagram":
             logger.info(f"Processing voice message {message.message_id} in diagram mode.")
-            # a. Generate diagram data from transcript
-            diagram_data = await generate_diagram_data(transcript_text, chat_lang)
+            
+            # Get author information
+            author_name = "Unknown User"
+            try:
+                user_id = message.from_user.id
+                author_chat = await context.bot.get_chat(user_id)
+                author_name = author_chat.full_name or author_name
+            except Exception as name_e:
+                logger.warning(f"Could not fetch author name: {name_e}")
+                
+            # Generate diagram with author info and language
+            diagram_data = await generate_diagram_data(transcript_text, chat_lang, author_name)
             if not diagram_data:
                 error_msg = get_string('diagram_error_data', chat_lang)
-                await status_message.edit_text(f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}", reply_markup=reply_markup, parse_mode='MarkdownV2')
+                await status_message.edit_text(error_msg)
+                return
+                
+            mermaid_code_body = create_mermaid_syntax(diagram_data, chat_lang) # Changed variable name
+            if mermaid_code_body is None: # Check for None explicitly
+                error_msg = get_string('diagram_error_syntax', chat_lang)
+                await status_message.edit_text(error_msg)
+                return
+                
+            # Save for history recording
+            mermaid_syntax_to_save = mermaid_code_body
+            
+            # Render the diagram including metadata and language
+            diagram_png = render_mermaid_to_png(mermaid_code_body, diagram_data, chat_lang) # Pass mermaid_code_body
+            if not diagram_png:
+                error_msg = get_string('diagram_error_render', chat_lang)
+                await status_message.edit_text(error_msg)
                 return
             
-            # b. Create Mermaid syntax
-            mermaid_syntax = create_mermaid_syntax(diagram_data)
-            if not mermaid_syntax:
-                error_msg = get_string('diagram_error_syntax', chat_lang)
-                await status_message.edit_text(f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}", reply_markup=reply_markup, parse_mode='MarkdownV2')
-                return
-            mermaid_syntax_to_save = mermaid_syntax # Save syntax to DB
-
-            # c. Render Mermaid to PNG
-            png_bytes = render_mermaid_to_png(mermaid_syntax)
-            if not png_bytes:
-                error_msg = get_string('diagram_error_render', chat_lang)
-                await status_message.edit_text(f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}", reply_markup=reply_markup, parse_mode='MarkdownV2')
-                return
-
             # d. Send Photo
             try:
                 # Send the photo with caption and buttons
                 sent_message = await context.bot.send_photo(
                     chat_id=message.chat_id,
-                    photo=png_bytes,
+                    photo=diagram_png,
                     caption=header, 
                     parse_mode='MarkdownV2',
                     reply_markup=reply_markup,
@@ -1026,9 +1205,9 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
                 logger.error(f"Failed to send diagram photo: {send_photo_e}", exc_info=True)
                 error_msg = get_string('error', chat_lang) # Generic error
                 # Try editing the status message as fallback
-                await status_message.edit_text(f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}", reply_markup=reply_markup, parse_mode='MarkdownV2')
+                await status_message.edit_text(error_msg)
                 return
-
+        
         else: # Handle text modes
             # Determine primary text to display based on the mode
             if mode == 'as_is' or mode == 'transcript':
@@ -1095,703 +1274,991 @@ async def button_callback(update: Update, context: CallbackContext):
     query = update.callback_query
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
-    
-    # Parse the callback data
-    data_parts = query.data.split(":")
-    action = data_parts[0]
-    
-    logger.debug(f"Button callback: {action} with data {data_parts}")
-    
-    # Get database pool from context
     pool = context.bot_data.get('db_pool')
+    
+    # Ensure pool is available
+    if not pool:
+        await query.answer(get_string('error_db', 'ru'), show_alert=True) # Default to RU for initial error
+        return
+        
+    # Get chat language AFTER confirming pool exists
+    chat_lang = await get_chat_language(pool, chat_id)
+
+    data = query.data
+    data_parts = data.split(":")
+    action = data_parts[0]
+    logger.info(f"Button callback received: action='{action}', data='{data}', user={user_id}, chat={chat_id}")
+
+    # === No-Context Actions (Called from main settings or language select) ===
+    if action == "noop":
+        await query.answer() # Acknowledge silently
+        return
+
+    elif action == "settings":
+        # This handles the /settings command or the top-level settings button
+        await show_main_settings_menu(update, context)
+        await query.answer()
+        return
+
+    elif action == "language_menu": # Show language options from main settings
+        await show_language_selection(update, context, from_settings=True)
+        await query.answer()
+        return
+        
+    elif action == "set_language": # Set language from main language menu
+        if len(data_parts) > 1:
+            new_lang = data_parts[1]
+            if new_lang in LANGUAGES:
+                 await set_chat_language(pool, chat_id, new_lang)
+                 await query.answer(f"{LANGUAGES[new_lang]['emoji']} Language set to {LANGUAGES[new_lang]['name']}")
+                 # Go back to main settings menu
+                 await show_main_settings_menu(update, context)
+            else:
+                 await query.answer("Invalid language code.", show_alert=True)
+        else:
+             await query.answer("Invalid language data.", show_alert=True)
+        return # Answer handled within
+
+    elif action == "settings_mode_menu": # Show default mode options from main settings
+        await show_settings_mode_menu(update, context)
+        await query.answer()
+        return
+        
+    elif action == "set_default_mode_main": # Set default mode from main settings menu
+        if len(data_parts) > 1:
+             new_mode = data_parts[1]
+             if new_mode in SUPPORTED_MODES:
+                  success = await set_chat_default_mode(pool, chat_id, new_mode)
+                  if success:
+                       localized_mode_name = get_mode_name(new_mode, chat_lang)
+                       await query.answer(f"Default mode set to '{localized_mode_name}'")
+                       await show_main_settings_menu(update, context) # Go back to main settings
+                  else:
+                       await query.answer(get_string('error_db', chat_lang), show_alert=True)
+             else:
+                  await query.answer("Invalid mode.", show_alert=True)
+        else:
+             await query.answer("Invalid mode data.", show_alert=True)
+        return # Answer handled within
+
+    elif action == "show_command_history": # Show history from main settings
+        if len(data_parts) > 1:
+             try:
+                  offset = int(data_parts[1])
+                  await show_command_history(update, context, offset)
+             except (ValueError, IndexError):
+                  await query.answer("Invalid history data.", show_alert=True)
+        else:
+             await query.answer("Invalid history data.", show_alert=True)
+        await query.answer() # Acknowledge button press
+        return
+
+    elif action == "subscription_info": # Show subscription info from main settings
+        await show_subscription_info(update, context)
+        await query.answer()
+        return
+        
+    elif action == "help": # Show help info from main settings
+        # Check if we need context (e.g., back button from message-specific help)
+        original_msg_id_str = data_parts[1] if len(data_parts) > 1 else None
+        await show_help_menu(update, context, original_msg_id_str)
+        await query.answer()
+        return
+
+    elif action == "close_settings": # Close the main settings message
+        try:
+            await query.message.delete()
+            await query.answer("Settings closed.")
+        except Exception as e:
+            logger.warning(f"Could not delete settings message: {e}")
+            await query.answer() # Acknowledge anyway
+        return
+
+    # === Actions Requiring Original Message Context ===
+    # All actions below this point require original_msg_id as the second part (data_parts[1])
+    original_msg_id = None
+    if len(data_parts) > 1:
+        try:
+            original_msg_id = int(data_parts[1])
+        except (ValueError, TypeError, IndexError):
+             # Allow certain actions like history nav/delete to potentially parse context differently if needed,
+             # but most message-specific actions require original_msg_id here.
+            if action not in ["history_nav", "delete_history_confirm", "delete_history_execute", "delete_history_execute_all", "export_history"]:
+                 logger.warning(f"Callback action '{action}' missing or invalid original_msg_id in data: '{data}'")
+                 await query.answer(get_string('error_invalid_context', chat_lang), show_alert=True)
+                 return
+            else:
+                  pass # Let specific handlers parse their own context if necessary
+    else:
+        # If no second part, it's not a message-context action (should have been handled above)
+        logger.warning(f"Callback action '{action}' seems to be missing original_msg_id context: '{data}'")
+        await query.answer(get_string('error_invalid_context', chat_lang), show_alert=True)
+        return
+
+    # --- Dispatch Message-Context Actions ---
+    if action == "confirm":
+        try:
+            # Remove buttons by editing reply markup to None
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.answer(get_string('action_confirmed', chat_lang)) # Localized confirmation
+        except Exception as e:
+            logger.warning(f"Could not remove buttons on confirm: {e}")
+            await query.answer() # Acknowledge anyway
+        return
+
+    elif action == "mode_select": # Show mode options for the specific message
+        await show_mode_selection(update, context, original_msg_id)
+        await query.answer() # Acknowledge button press
+        return
+
+    elif action == "mode_set": # Set mode for the specific message
+        await mode_set(update, context, data_parts, original_msg_id)
+        # mode_set handles its own query.answer and message edits
+        return
+
+    elif action == "redo": # Redo processing for the specific message
+        await redo(update, context, original_msg_id)
+        # redo handles its own query.answer and message edits
+        return
+
+    elif action == "settings": # Show settings specific to this voice message
+        # This action name is overloaded, context (original_msg_id) differentiates it
+        await show_voice_message_settings(update, context, original_msg_id)
+        await query.answer()
+        return
+        
+    elif action == "back_to_main": # Back from voice settings to main action buttons
+        await back_to_main_buttons(update, context, original_msg_id)
+        await query.answer()
+        return
+
+    elif action == "show_pin_menu": # Show confirmation to pin mode from message context
+        await show_pin_menu(update, context, original_msg_id)
+        await query.answer() # Acknowledge button press
+        return
+
+    elif action == "set_default_mode": # Pin the mode from the specific message as chat default
+        if len(data_parts) > 2:
+            mode_to_pin = data_parts[2]
+            await set_chat_default_mode_from_pin(update, context, original_msg_id, mode_to_pin)
+        else:
+            logger.error("Invalid data for set_default_mode")
+            await query.answer(get_string('error', chat_lang), show_alert=True)
+        # set_chat_default_mode_from_pin handles its own answer/edits
+        return
+
+    elif action == "cancel_mode_select": # Cancel mode selection, go back to main buttons
+        await back_to_main_buttons(update, context, original_msg_id)
+        await query.answer()
+        return
+        
+    elif action == "voice_language_menu": # Show language options within voice message settings
+        await show_language_selection(update, context, from_settings=False, original_msg_id=original_msg_id)
+        await query.answer()
+        return
+        
+    elif action == "set_language_and_back": # Set language from voice message settings
+        if len(data_parts) > 2:
+             new_lang = data_parts[1]
+             original_msg_id_for_back = int(data_parts[2])
+             if new_lang in LANGUAGES:
+                  await set_chat_language(pool, chat_id, new_lang)
+                  await query.answer(f"{LANGUAGES[new_lang]['emoji']} Language set to {LANGUAGES[new_lang]['name']}")
+                  # Go back to voice message settings menu
+                  await show_voice_message_settings(update, context, original_msg_id_for_back)
+             else:
+                  await query.answer("Invalid language code.", show_alert=True)
+        else:
+             await query.answer("Invalid language data.", show_alert=True)
+        return # Answer handled within
+
+    elif action == "voice_subscription_info": # Show subscription info from voice message settings
+        await show_subscription_info(update, context, original_msg_id=original_msg_id)
+        await query.answer()
+        return
+
+    elif action == "history": # Show history starting from a specific voice message context
+        # Called from voice message settings
+        if len(data_parts) > 2:
+             try:
+                  offset = int(data_parts[2])
+                  # Use the original_msg_id as the context_message_id for history nav
+                  await handle_history_navigation(update, context, [action, str(original_msg_id), str(offset)], from_settings_menu=False)
+             except (ValueError, IndexError):
+                  await query.answer("Invalid history data.", show_alert=True)
+        else:
+             await query.answer("Invalid history data.", show_alert=True)
+        # handle_history_navigation handles its own query.answer
+        return
+        
+    elif action == "history_nav": # Navigate history pages
+        # Context ID (data_parts[1]) could be original_msg_id or settings msg id
+        await handle_history_navigation(update, context, data_parts) # Pass all parts
+        # handle_history_navigation handles its own query.answer
+        return
+
+    elif action == "delete_history_confirm":
+        await show_delete_history_confirmation(update, context, data_parts)
+        # show_delete_history_confirmation handles query.answer
+        return
+        
+    elif action == "delete_history_execute":
+        await execute_delete_history(update, context, data_parts)
+        # execute_delete_history handles query.answer
+        return
+        
+    elif action == "delete_history_execute_all":
+        await execute_delete_all_history(update, context, data_parts)
+        # execute_delete_all_history handles query.answer
+        return
+
+    elif action == "export_history":
+        await export_user_history(update, context, data_parts)
+        # export_user_history handles query.answer
+        return
+
+    # Fallback for unhandled actions
+    logger.warning(f"Unhandled button callback action: '{action}' with data '{data}'")
+    await query.answer(get_string('error_unhandled_action', chat_lang)) # Localized message
+
+async def handle_history_navigation(update: Update, context: CallbackContext, data_parts: list, from_settings_menu: bool | None = None):
+    """Handles navigation through user history. Can be called from main settings or voice settings."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    pool = context.bot_data.get('db_pool')
+    chat_lang = await get_chat_language(pool, chat_id)
+
     if not pool:
         await query.answer("Database error", show_alert=True)
         return
     
-    # Get chat's current language
+    if len(data_parts) < 3:
+        await query.answer("Invalid navigation data", show_alert=True)
+        return
+
+    try:
+        # Note: This ID might be the original voice message OR the settings message ID
+        context_message_id = int(data_parts[1]) 
+        offset = int(data_parts[2])
+    except ValueError:
+        await query.answer("Invalid data format", show_alert=True)
+        return
+        
+    limit = HISTORY_PAGE_SIZE # Use constant
+    
+    # Determine context if not explicitly passed (e.g., direct call from history_nav)
+    if from_settings_menu is None:
+         try:
+              # Check if context_message_id corresponds to an existing summary record
+              voice_record_check = await get_summary_context_for_callback(pool, context_message_id, chat_id)
+              from_settings_menu = not bool(voice_record_check) # True if NO record found
+              logger.debug(f"History nav context determined: from_settings={from_settings_menu} (context_msg_id: {context_message_id})")
+         except Exception as e:
+              logger.warning(f"Error auto-detecting history context, assuming settings: {e}")
+              from_settings_menu = True
+    
+    try:
+        # Fetch the history record for the new offset
+        history_records, total_count = await get_user_history(pool, user_id, chat_id, limit, offset)
+
+        if not history_records:
+            # Should not happen if total_count > 0, but handle defensively
+            await query.answer("History record not found for this offset.", show_alert=True)
+            return
+            
+        record = history_records[0]
+        current_index = offset + 1
+
+        # Fetch author name (similar to show_command_history)
+        author_name = "Unknown User"
+        record_user_id = record.get('user_id')
+        if record_user_id:
+            try:
+                author_chat = await context.bot.get_chat(record_user_id)
+                author_name = author_chat.full_name or author_name
+            except Exception as name_e:
+                logger.warning(f"Could not fetch author name for user_id {record_user_id}: {name_e}")
+
+        history_message = format_history_message(record, current_index, total_count, chat_lang, author_name)
+        
+        # Create pagination buttons, passing the from_settings flag
+        reply_markup = create_history_pagination_buttons(
+            context_message_id, 
+            offset, 
+            total_count, 
+            limit, 
+            chat_lang, 
+            from_settings_menu=from_settings_menu # Pass the determined flag
+        )
+        
+        await query.edit_message_text(
+            history_message, 
+            reply_markup=reply_markup, 
+            parse_mode=ParseMode.MARKDOWN_V2
+        )
+
+    except Exception as e:
+        logger.error(f"Error during history navigation: {e}", exc_info=True)
+        await query.answer("Error navigating history.", show_alert=True)
+        
+    await query.answer()
+
+async def show_main_settings_menu(update: Update, context: CallbackContext):
+    """Shows the main settings menu (not tied to a specific message)."""
+    query = update.callback_query
+    message = query.message if query else update.message # Handle command or callback
+    chat_id = message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return # Error handled elsewhere or logged
+    
     chat_lang = await get_chat_language(pool, chat_id)
     
-    # Handle noop action specifically
-    if action == "noop":
-        return
+    # Localize menu options from locales.py
+    lang_btn_text = get_string('settings_language', chat_lang)
+    history_btn_text = get_string('settings_history', chat_lang)
+    sub_btn_text = get_string('settings_subscription', chat_lang)
+    mode_btn_text = get_string('settings_default_mode', chat_lang)
+    help_btn_text = get_string('settings_help', chat_lang)
+    close_btn_text = get_string('button_close', chat_lang)
     
-    # Handle show command history
-    elif action == "show_command_history":
-        if len(data_parts) < 2:
-            await query.answer("Invalid callback data", show_alert=True)
-            return
-        
-        # Parse offset parameter (default to 0 if missing or invalid)
-        try:
-            offset = int(data_parts[1]) if len(data_parts) > 1 else 0
-        except ValueError:
-            offset = 0
-            logger.warning(f"Invalid offset value in show_command_history data: {data_parts}, defaulting to 0")
-        
-        # Get user history
-        user_id = update.effective_user.id
-        # limit = 5  # Number of history items per page -> Now uses HISTORY_PAGE_SIZE
-        limit = HISTORY_PAGE_SIZE 
-        
-        try:
-            # Fetch user history from database
-            history_records, total_count = await get_user_history(
-                pool, user_id, chat_id, limit, offset
-            )
-            
-            if not history_records:
-                # No history found
-                no_history_message = "You don't have any voice message history yet."
-                if chat_lang == 'ru':
-                    no_history_message = "У вас пока нет истории голосовых сообщений."
-                elif chat_lang == 'kk':
-                    no_history_message = "Сізде әлі дауыстық хабарлама тарихы жоқ."
-                
-                # Create a simple back button if no history
-                no_history_keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Назад к настройкам" if chat_lang == 'ru' else "⬅️ Back to Settings", callback_data="settings")]
-                ])
-                await query.edit_message_text(
-                    no_history_message,
-                    reply_markup=no_history_keyboard
-                )
-                await query.answer()
-                return
-            
-            # Format history message (only the first record since limit=1)
-            record = history_records[0]
-            current_index = offset + 1
+    keyboard = [
+        [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
+        [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
+        [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")], # Show history from chat context
+        [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
+        [InlineKeyboardButton(help_btn_text, callback_data="help")],
+        [InlineKeyboardButton(close_btn_text, callback_data="close_settings")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    welcome_text = get_string('settings_welcome', chat_lang)
+    
+    try:
+        if query:
+             await query.edit_message_text(welcome_text, reply_markup=reply_markup)
+        else:
+             await message.reply_text(welcome_text, reply_markup=reply_markup)
+    except Exception as e:
+        logger.error(f"Error showing main settings menu: {e}")
+        if query: await query.answer(get_string('error', chat_lang), show_alert=True)
 
-            # Fetch author name
+async def show_language_selection(update: Update, context: CallbackContext, from_settings: bool, original_msg_id: int | None = None):
+    """Shows language selection options, adapting callback for context."""
+    query = update.callback_query
+    message = query.message
+    chat_id = message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    keyboard = []
+    row = []
+    for code, lang_info in LANGUAGES.items():
+        # Callback depends on whether we came from main settings or voice settings
+        callback_action = "set_language" if from_settings else f"set_language_and_back:{code}:{original_msg_id}"
+        button = InlineKeyboardButton(
+            f"{lang_info['emoji']} {lang_info['name']}", 
+            callback_data=callback_action
+        )
+        row.append(button)
+        if len(row) == 2:  # 2 buttons per row
+            keyboard.append(row)
+            row = []
+    if row: keyboard.append(row)
+    
+    # Add Back button
+    back_callback = "settings" if from_settings else f"settings:{original_msg_id}" # Go back to main settings or voice settings
+    back_label = get_string('button_back', chat_lang)
+    keyboard.append([InlineKeyboardButton(back_label, callback_data=back_callback)])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = get_string('language_select', chat_lang)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+    
+async def show_settings_mode_menu(update: Update, context: CallbackContext):
+    """Shows the menu to select the default mode for the chat (from main settings)."""
+    query = update.callback_query
+    message = query.message
+    chat_id = message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    
+    chat_lang = await get_chat_language(pool, chat_id)
+    current_default_mode = await get_chat_default_mode(pool, chat_id, DEFAULT_MODE)
+    
+    keyboard = []
+    mode_emojis = {"brief": "📝", "detailed": "📋", "bullet": "🔍", "combined": "📊", "as_is": "📄", "pasha": "💊", "diagram": "📈"}
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "diagram", "pasha"]
+
+    for mode_key in mode_order:
+        if mode_key in SUPPORTED_MODES:
+            emoji = mode_emojis.get(mode_key, "")
+            mode_name = get_mode_name(mode_key, chat_lang)
+            display_name = f"{emoji} {mode_name}"
+            if mode_key == current_default_mode:
+                display_name += " ★" # Indicator for current default
+            
+            keyboard.append([
+                InlineKeyboardButton(display_name, callback_data=f"set_default_mode_main:{mode_key}")
+            ])
+    
+    # Add Back button to main settings
+    back_label = get_string('button_back', chat_lang)
+    keyboard.append([InlineKeyboardButton(back_label, callback_data="settings")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = get_string('default_mode_select', chat_lang)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+    
+async def show_command_history(update: Update, context: CallbackContext, offset: int):
+    """Displays user history, called from the main settings menu."""
+    query = update.callback_query
+    message = query.message
+    chat_id = message.chat_id
+    user_id = query.from_user.id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    
+    chat_lang = await get_chat_language(pool, chat_id)
+    limit = HISTORY_PAGE_SIZE
+    
+    try:
+        history_records, total_count = await get_user_history(pool, user_id, chat_id, limit, offset)
+        
+        if not history_records:
+            await query.edit_message_text(get_string('history_empty', chat_lang), reply_markup=create_history_pagination_buttons(message.message_id, offset, total_count, limit, chat_lang, from_settings_menu=True))
+            return
+            
+        record = history_records[0]
+        current_index = offset + 1
+        
+        # Fetch author name safely
+        author_name = "Unknown User"
+        record_user_id = record.get('user_id')
+        if record_user_id:
+             try:
+                  author_chat = await context.bot.get_chat(record_user_id)
+                  author_name = author_chat.full_name or author_name
+             except Exception as name_e:
+                  logger.warning(f"Could not fetch author name for history: {name_e}")
+
+        history_message = format_history_message(record, current_index, total_count, chat_lang, author_name)
+        # Use the settings message ID as context for pagination
+        reply_markup = create_history_pagination_buttons(message.message_id, offset, total_count, limit, chat_lang, from_settings_menu=True)
+        
+        await query.edit_message_text(history_message, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+        
+    except Exception as e:
+        logger.error(f"Error fetching/displaying command history: {e}", exc_info=True)
+        await query.edit_message_text(get_string('error', chat_lang))
+
+async def show_subscription_info(update: Update, context: CallbackContext, original_msg_id: int | None = None):
+    """Displays subscription information."""
+    query = update.callback_query
+    message = query.message
+    chat_id = message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Placeholder text - replace with actual subscription logic
+    sub_info_text = get_string('subscription_info_placeholder', chat_lang)
+    
+    # Determine back button context
+    if original_msg_id:
+         back_callback = f"settings:{original_msg_id}" # Back to voice settings
+    else:
+         back_callback = "settings" # Back to main settings
+         
+    back_label = get_string('button_back', chat_lang)
+    keyboard = [[InlineKeyboardButton(back_label, callback_data=back_callback)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(sub_info_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+
+async def show_help_menu(update: Update, context: CallbackContext, original_msg_id_str: str | None = None):
+    """Sends detailed help information, potentially with context-aware back button."""
+    query = update.callback_query
+    message = query.message if query else update.message
+    chat_id = message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    
+    chat_lang = await get_chat_language(pool, chat_id)
+    help_text = get_string('help', chat_lang)
+    
+    # Determine back button context
+    if original_msg_id_str:
+        try:
+            original_msg_id = int(original_msg_id_str)
+            back_callback = f"settings:{original_msg_id}" # Back to voice settings
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid original_msg_id '{original_msg_id_str}' in help callback, defaulting to main settings back button.")
+            back_callback = "settings" # Back to main settings
+    else:
+        back_callback = "settings" # Back to main settings
+        
+    back_label = get_string('button_back', chat_lang)
+    keyboard = [[InlineKeyboardButton(back_label, callback_data=back_callback)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    try:
+        if query:
+            await query.edit_message_text(help_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        else:
+            await message.reply_text(help_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        logger.error(f"Error showing help menu: {e}")
+        if query: await query.answer(get_string('error', chat_lang), show_alert=True)
+
+async def show_voice_message_settings(update: Update, context: CallbackContext, original_msg_id: int):
+    """Shows the settings menu specific to a voice message reply."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    reply_markup = create_voice_settings_buttons(original_msg_id, chat_lang)
+    text = get_string('voice_settings_title', chat_lang)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+    
+async def back_to_main_buttons(update: Update, context: CallbackContext, original_msg_id: int):
+    """Returns the message to display the main action buttons."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+
+    try:
+        # Get the original content to display
+        db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
+        if not db_record:
+            await query.edit_message_text(get_string('error_record_not_found', chat_lang), reply_markup=None)
+            return
+
+        record_id = db_record['id']
+        mode = db_record['mode']
+        summary_text = db_record['summary_text']
+        transcript_text = db_record['transcript_text']
+        user_id = db_record['user_id']
+        current_summary_msg_id = db_record['summary_telegram_message_id']
+        
+        # Regenerate header
+        original_user = await context.bot.get_chat(user_id)
+        original_message_date = db_record.get('created_at') or query.message.date
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+        moscow_time_str = escape_markdown(moscow_time, version=2)
+        user_name = escape_markdown(original_user.full_name, version=2)
+        header = f"*{user_name}* \\| {moscow_time_str}"
+        reply_markup = create_action_buttons(original_msg_id, chat_lang)
+
+        if mode == 'diagram':
+             # For diagram, we just need to edit the caption back
+             # The summary_text field holds the Mermaid code, not needed here
+             # We assume the message is still a photo
+             try:
+                  await context.bot.edit_message_caption(
+                       chat_id=chat_id, message_id=current_summary_msg_id,
+                       caption=header, reply_markup=reply_markup, parse_mode='MarkdownV2'
+                  )
+             except Exception as e:
+                  logger.error(f"Failed to edit caption back for diagram {current_summary_msg_id}: {e}")
+                  # Fallback? Maybe send error text
+                  await query.edit_message_text(get_string('error', chat_lang))
+        else:
+             # For text modes, regenerate the text content
+             if mode == 'as_is' or mode == 'transcript':
+                  display_text = transcript_text
+             else:
+                  display_text = summary_text
+             
+             escaped_display_text = escape_markdown_preserve_formatting(display_text if display_text else get_string('error_no_content', chat_lang))
+             final_text = f"{header}\n\n{escaped_display_text}"
+             
+             await query.edit_message_text(final_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN_V2)
+
+    except Exception as e:
+        logger.error(f"Error returning to main buttons for message {original_msg_id}: {e}", exc_info=True)
+        await query.edit_message_text(get_string('error', chat_lang))
+        
+async def set_chat_default_mode_from_pin(update: Update, context: CallbackContext, original_msg_id: int, mode_to_pin: str):
+    """Sets the chat default mode after user confirms via pin menu."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    if mode_to_pin not in SUPPORTED_MODES:
+         await query.answer("Invalid mode to pin.", show_alert=True)
+         await back_to_main_buttons(update, context, original_msg_id) # Go back to main buttons
+         return
+         
+    success = await set_chat_default_mode(pool, chat_id, mode_to_pin)
+    if success:
+         localized_mode_name = get_mode_name(mode_to_pin, chat_lang)
+         await query.answer(f"Default mode set to '{localized_mode_name}'")
+         # Return to the main action buttons view
+         await back_to_main_buttons(update, context, original_msg_id)
+    else:
+         await query.answer(get_string('error_db', chat_lang), show_alert=True)
+         # Optionally go back or stay on pin menu?
+         await back_to_main_buttons(update, context, original_msg_id)
+
+async def show_delete_history_confirmation(update: Update, context: CallbackContext, data_parts: list):
+    """Shows confirmation buttons for deleting chat history."""
+    # ["delete_history_confirm", context_message_id, current_offset]
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    if len(data_parts) < 3:
+         logger.error("Invalid data for delete_history_confirm")
+         await query.answer(get_string('error', chat_lang), show_alert=True)
+         return
+
+    context_message_id = int(data_parts[1])
+    current_offset = int(data_parts[2]) # Keep offset to return if cancelled
+
+    confirm_text = get_string('history_delete_confirm', chat_lang)
+    yes_label = get_string('button_yes', chat_lang)
+    no_label = get_string('button_no', chat_lang)
+    
+    keyboard = [
+        [InlineKeyboardButton(yes_label, callback_data=f"delete_history_execute_all:{context_message_id}")],
+        # No option to delete single item currently
+        [InlineKeyboardButton(no_label, callback_data=f"history_nav:{context_message_id}:{current_offset}")] # Go back to the history view
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(confirm_text, reply_markup=reply_markup)
+    await query.answer() # Acknowledge button press
+    
+async def execute_delete_history(update: Update, context: CallbackContext, data_parts: list):
+    """Deletes a single history item (Not currently used)."""
+    # Placeholder if we add single item deletion later
+    query = update.callback_query
+    await query.answer("Single item deletion not implemented.", show_alert=True)
+
+async def execute_delete_all_history(update: Update, context: CallbackContext, data_parts: list):
+    """Deletes all history items for the chat."""
+    # ["delete_history_execute_all", context_message_id]
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    user_id = query.from_user.id # For logging/confirmation
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    if len(data_parts) < 2:
+        logger.error("Invalid data for delete_history_execute_all")
+        await query.answer(get_string('error', chat_lang), show_alert=True)
+        return
+        
+    context_message_id = int(data_parts[1])
+    
+    success = await delete_chat_history(pool, chat_id)
+    if success:
+         logger.info(f"User {user_id} deleted all history for chat {chat_id}")
+         await query.edit_message_text(get_string('history_deleted_success', chat_lang), reply_markup=None) # Remove buttons
+         await query.answer("History deleted.")
+         # Optionally, could add a button to go back to settings?
+    else:
+         await query.answer(get_string('error_db', chat_lang), show_alert=True)
+         # Try to go back to the confirmation screen or history view?
+         # For now, just show error alert.
+         
+async def export_user_history(update: Update, context: CallbackContext, data_parts: list):
+    """Exports user history as a text file."""
+    # ["export_history", context_message_id]
+    query = update.callback_query
+    message = query.message
+    chat_id = message.chat_id
+    user_id = query.from_user.id
+    pool = context.bot_data.get('db_pool')
+    if not pool: return
+    chat_lang = await get_chat_language(pool, chat_id)
+
+    await query.answer(get_string('history_exporting', chat_lang))
+    
+    try:
+        history_records = await get_all_chat_history(pool, chat_id)
+        if not history_records:
+            await query.edit_message_text(get_string('history_empty', chat_lang)) # Edit the message
+            return
+
+        export_content = io.StringIO()
+        export_content.write(f"Chat History Export - Chat ID: {chat_id}\n")
+        export_content.write(f"Exported by User ID: {user_id} on {datetime.now(MOSCOW_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}\n")
+        export_content.write("="*40 + "\n\n")
+
+        for i, record in enumerate(reversed(history_records)): # Show newest first
             author_name = "Unknown User"
             record_user_id = record.get('user_id')
             if record_user_id:
-                try:
-                    author_chat = await context.bot.get_chat(record_user_id)
-                    author_name = author_chat.full_name or author_name
-                except Exception as name_e:
-                    logger.warning(f"Could not fetch author name for user_id {record_user_id}: {name_e}")
-            
-            history_message = format_history_message(
-                record, current_index, total_count, chat_lang, author_name=author_name
-            )
-            
-            # Create pagination buttons (pass original message ID if available, else maybe 0 or handle differently?)
-            # We don't have original_msg_id here, as this is from settings menu.
-            # Let's pass the current message_id being edited.
-            current_message_id = query.message.message_id if query.message else 0
-            reply_markup = create_history_pagination_buttons(current_message_id, offset, total_count, limit, chat_lang)
-            
-            # Update the message with history and pagination buttons, using MarkdownV2
+                 try:
+                      author_chat = await context.bot.get_chat(record_user_id)
+                      author_name = author_chat.full_name or author_name
+                 except Exception:
+                      pass # Ignore if user not found
+                      
+            formatted_msg = format_history_message(record, i + 1, len(history_records), chat_lang, author_name)
+            # Remove MarkdownV2 formatting for plain text export
+            plain_text_msg = re.sub(r'[\*_\[\]()~`>#+=|{}.!\\]', '', formatted_msg)
+            export_content.write(f"Record {i+1}:\n{plain_text_msg}\n")
+            export_content.write("-"*40 + "\n\n")
+
+        export_content.seek(0)
+        export_filename = f"chat_{chat_id}_history_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        
+        await message.reply_document(
+            document=io.BytesIO(export_content.getvalue().encode('utf-8')),
+            filename=export_filename,
+            caption=get_string('history_export_caption', chat_lang)
+        )
+        export_content.close()
+
+    except Exception as e:
+        logger.error(f"Error exporting history for chat {chat_id}: {e}", exc_info=True)
+        await query.answer(get_string('error', chat_lang), show_alert=True)
+
+async def redo(update: Update, context: CallbackContext, original_msg_id: int):
+    """Re-processes the voice message with the current mode."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    pool = context.bot_data.get('db_pool')
+    
+    # Ensure pool is available
+    if not pool:
+        # Need chat_lang for error message, try getting it or default
+        try: chat_lang = await get_chat_language(pool, chat_id)
+        except: chat_lang = 'ru' # Default on error
+        logger.error("Database pool not found for redo callback")
+        await query.answer(get_string('error_db', chat_lang), show_alert=True)
+        return
+        
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Show processing indicator (localized)
+    processing_text = get_string('redo_processing', chat_lang)
+    try:
+        # Edit the existing message (text or photo caption)
+        await context.bot.edit_message_caption(
+             chat_id=chat_id, message_id=query.message.message_id, caption=processing_text
+        )
+    except Exception:
+        try:
+             await context.bot.edit_message_text(
+                  processing_text, chat_id=chat_id, message_id=query.message.message_id
+             )
+        except Exception as edit_err:
+             logger.warning(f"Could not edit message {query.message.message_id} for redo status: {edit_err}")
+             await query.answer(processing_text) # Use answer as fallback indicator
+
+    try:
+        # Get the record from the database
+        db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
+        
+        if not db_record:
+            logger.error(f"Record not found for message {original_msg_id} during redo")
             await query.edit_message_text(
-                history_message,
-                reply_markup=reply_markup,
-                parse_mode=ParseMode.MARKDOWN_V2
+                get_string('error_record_not_found', chat_lang),
+                reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
-            
-        except Exception as e:
-            logger.error(f"Error displaying history: {str(e)}", exc_info=True)
-            error_message = "Error retrieving history. Please try again later."
-            if chat_lang == 'ru':
-                error_message = "Ошибка при получении истории. Пожалуйста, попробуйте позже."
-            elif chat_lang == 'kk':
-                error_message = "Тарихты алу қатесі. Кейінірек қайталап көріңіз."
-            
-            await query.answer(error_message, show_alert=True)
-        
-        await query.answer()
-        return
-    
-    # Handle language settings
-    if action == "set_language":
-        if len(data_parts) < 2:
-            await query.answer("Missing language parameter", show_alert=True)
-            return
-            
-        language = data_parts[1]
-        if language not in LANGUAGES:
-            await query.answer("Unsupported language", show_alert=True)
-            return
-            
-        # Set language for this chat
-        success = await set_chat_language(pool, chat_id, language)
-        if success:
-            # Show confirmation
-            await query.answer(get_string('language_set', language), show_alert=True)
-            
-            # Create settings and help buttons
-            settings_label = "⚙️ Настройки"
-            help_label = "❓ Помощь"
-            
-            if language == 'en':
-                settings_label = "⚙️ Settings"
-                help_label = "❓ Help"
-            elif language == 'kk':
-                settings_label = "⚙️ Параметрлер"
-                help_label = "❓ Көмек"
-            
-            start_buttons = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(settings_label, callback_data="settings"),
-                    InlineKeyboardButton(help_label, callback_data="help")
-                ]
-            ])
-            
-            # Get the welcome text without the language selection prompt
-            start_text = get_string('start', language)
-            # Replace the language selection prompt at the end with the voice check request
-            start_text = start_text.replace("**Please choose your language to start:**", "")
-            start_text = start_text.replace("**Пожалуйста, выберите ваш язык для начала:**", "")
-            start_text = start_text.replace("**Бастау үшін тілді таңдаңыз:**", "")
-            # Add the voice check request
-            start_text = start_text.strip() + "\n\n" + get_string('send_voice_check', language)
-            
-            # Update the message with the new language and buttons
-            await query.edit_message_text(
-                start_text,
-                reply_markup=start_buttons,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            await query.answer("Failed to set language", show_alert=True)
-        return
-    
-    # Handle language setting from voice menu
-    elif action == "set_language_and_back":
-        if len(data_parts) < 3:
-            await query.answer("Missing parameters", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        language = data_parts[2]
-        
-        if language not in LANGUAGES:
-            await query.answer("Unsupported language", show_alert=True)
             return
         
-        # Set language for this chat
-        success = await set_chat_language(pool, chat_id, language)
-        if success:
-            # Show confirmation
-            lang_info = LANGUAGES[language]
-            confirm_message = f"Language set to {lang_info['name']}"
-            if language == 'ru':
-                confirm_message = f"Язык изменен на {lang_info['name']}"
-            elif language == 'kk':
-                confirm_message = f"Тіл {lang_info['name']} тіліне өзгертілді"
-                
-            await query.answer(confirm_message, show_alert=True)
-            
-            # Return to voice settings with updated language
-            await query.edit_message_reply_markup(
-                reply_markup=create_voice_settings_buttons(original_msg_id, language)
-            )
-        else:
-            await query.answer("Failed to set language", show_alert=True)
-        return
-    
-    elif action == "settings":
-        # Check if the settings menu was opened from a message
-        original_msg_id = None
-        if len(data_parts) > 1:
-            try:
-                original_msg_id = int(data_parts[1])
-            except (ValueError, TypeError):
-                original_msg_id = None
+        record_id = db_record['id']
+        audio_file_id = db_record['telegram_audio_file_id']
+        current_mode = db_record['mode']
+        user_id = db_record['user_id']
         
-        # Localize menu options
-        lang_btn_text = "🌐 Change Language"
-        history_btn_text = "📚 History"
-        sub_btn_text = "💰 Subscription Info"
-        mode_btn_text = "⚙️ Default Mode"
-        help_btn_text = get_string('settings_help', chat_lang) # New Help button
-        close_btn_text = "❌ Close"
-        back_to_msg_text = "⬅️ Back to Message"
+        # Get user info for the header
+        original_user = await context.bot.get_chat(user_id)
+        # Use the original message date from DB if possible, else fallback to query message date
+        original_message_date = db_record.get('created_at') or query.message.date 
         
-        if chat_lang == 'ru':
-            lang_btn_text = "🌐 Изменить язык"
-            history_btn_text = "📚 История"
-            sub_btn_text = "💰 Информация о подписке"
-            mode_btn_text = "⚙️ Выбор режима"
-            # help_btn_text is already localized via get_string
-            close_btn_text = "❌ Закрыть"
-            back_to_msg_text = "⬅️ Назад к сообщению"
-        elif chat_lang == 'kk':
-            lang_btn_text = "🌐 Тілді өзгерту"
-            history_btn_text = "📚 Тарих"
-            sub_btn_text = "💰 Жазылым туралы ақпарат"
-            mode_btn_text = "⚙️ Әдепкі режим"
-            # help_btn_text is already localized via get_string
-            close_btn_text = "❌ Жабу"
-            back_to_msg_text = "⬅️ Хабарламаға оралу"
-        
-        keyboard = [
-            [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
-            [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
-            [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
-            [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
-            [InlineKeyboardButton(help_btn_text, callback_data="help")], # Added Help button
-        ]
-        
-        # Add "Back to Message" button if opened from a message
-        if original_msg_id is not None:
-            keyboard.append([InlineKeyboardButton(back_to_msg_text, callback_data=f"back_to_message:{original_msg_id}")])
-        
-        # Add close button
-        keyboard.append([InlineKeyboardButton(close_btn_text, callback_data="close_settings")])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Get appropriate welcome message based on language
-        welcome_text = "Please select an option:"
-        if chat_lang == 'ru':
-            welcome_text = "Пожалуйста, выберите опцию:"
-        elif chat_lang == 'kk':
-            welcome_text = "Опцияны таңдаңыз:"
-            
-        await query.edit_message_text(welcome_text, reply_markup=reply_markup)
-        await query.answer()
-        return
-    
-    # Handle voice settings menu
-    elif action == "voice_settings":
-        if len(data_parts) < 2:
-            await query.answer("Missing message ID", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        await query.edit_message_reply_markup(
-            reply_markup=create_voice_settings_buttons(original_msg_id, chat_lang)
-        )
-        return
-        
-    # Handle subscription info from voice menu
-    elif action == "voice_subscription_info":
-        if len(data_parts) < 2:
-            await query.answer("Missing message ID", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        # Create back button to voice settings
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send subscription info
-        await query.edit_message_text(
-            get_string('subscription_info', chat_lang),
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    # Handle help button
-    elif action == "help":
-        settings_label = "⚙️ Настройки"
-        
-        if chat_lang == 'en':
-            settings_label = "⚙️ Settings"
-        elif chat_lang == 'kk':
-            settings_label = "⚙️ Параметрлер"
-        
-        # Create settings button
-        help_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton(settings_label, callback_data="settings")]
-        ])
-        
-        await query.edit_message_text(
-            get_string('help', chat_lang),
-            reply_markup=help_buttons,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    # Handle voice language menu
-    elif action == "voice_language_menu":
-        if len(data_parts) < 2:
-            await query.answer("Missing message ID", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        # Create keyboard with language options
-        keyboard = []
-        row = []
-        for code, lang_info in LANGUAGES.items():
-            button = InlineKeyboardButton(
-                f"{lang_info['emoji']} {lang_info['name']}", 
-                callback_data=f"set_language_and_back:{original_msg_id}:{code}"
-            )
-            row.append(button)
-            if len(row) == 2:  # 2 buttons per row
-                keyboard.append(row)
-                row = []
-        
-        if row:  # Add any remaining buttons
-            keyboard.append(row)
-        
-        # Add back button
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")
-        ])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send language selection message
-        await query.edit_message_reply_markup(reply_markup=reply_markup)
-        return
-    
-    # Handle back to main menu from any submenu
-    elif action == "back_to_main":
-        if len(data_parts) < 2:
-            await query.answer("Missing message ID", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        await query.edit_message_reply_markup(
-            reply_markup=create_action_buttons(original_msg_id, chat_lang)
-        )
-        return
-        
-    elif action == "language_menu":
-        # Create keyboard with language options
-        keyboard = []
-        row = []
-        for code, lang_info in LANGUAGES.items():
-            button = InlineKeyboardButton(
-                f"{lang_info['emoji']} {lang_info['name']}", 
-                callback_data=f"set_language:{code}"
-            )
-            row.append(button)
-            if len(row) == 2:  # 2 buttons per row
-                keyboard.append(row)
-                row = []
-        
-        if row:  # Add any remaining buttons
-            keyboard.append(row)
-        
-        # Add back button
-        keyboard.append([
-            InlineKeyboardButton("⬅️ Back", callback_data="settings")
-        ])
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send language selection message
-        await query.edit_message_text(
-            get_string('choose_language', chat_lang),
-            reply_markup=reply_markup
-        )
-        return
-    
-    elif action == "subscription_info":
-        # Create back button
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="settings")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Send subscription info
-        await query.edit_message_text(
-            get_string('subscription_info', chat_lang),
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    elif action == "close_settings":
-        # Just remove the keyboard and change text
-        await query.edit_message_text(get_string('settings', chat_lang) + " ✅")
-        return
-    
-    # Handle settings mode menu
-    elif action == "settings_mode_menu":
-        await show_settings_mode_menu(update, context)
-        return
-    
-    # Handle setting default mode from settings
-    elif action == "settings_set_default_mode":
-        if len(data_parts) < 2:
-            await query.answer("Missing mode parameter", show_alert=True)
-            return
-            
-        mode = data_parts[1]
-        if mode not in SUPPORTED_MODES:
-            await query.answer("Unsupported mode", show_alert=True)
-            return
-            
-        # Set this mode as default for the chat
-        success = await set_chat_default_mode(pool, chat_id, mode)
-        if success:
-            # Get mode name in current chat language
-            mode_name = get_mode_name(mode, chat_lang)
-            confirm_message = f"Mode '{mode_name}' set as default"
-            if chat_lang == 'ru':
-                confirm_message = f"Режим '{mode_name}' установлен по умолчанию"
-            elif chat_lang == 'kk':
-                confirm_message = f"Режим '{mode_name}' әдепкі бойынша орнатылды"
-            
-            await query.answer(confirm_message, show_alert=True)
-            
-            # Show updated settings mode menu
-            await show_settings_mode_menu(update, context)
-        else:
-            # Error message in current chat language
-            error_message = "Failed to set default mode"
-            if chat_lang == 'ru':
-                error_message = "Не удалось установить режим по умолчанию"
-            elif chat_lang == 'kk':
-                error_message = "Әдепкі режимді орнату сәтсіз аяқталды"
-            
-            await query.answer(error_message, show_alert=True)
-        return
-    
-    # --- History Action Handlers ---
-    elif action == "delete_history_confirm":
-        if len(data_parts) < 3:
-            await query.answer("Missing data for delete confirmation", show_alert=True)
-            return
-        try:
-            original_msg_id = int(data_parts[1])
-            current_offset = int(data_parts[2]) # Needed for cancel
-        except ValueError:
-            await query.answer("Invalid data format for delete confirmation", show_alert=True)
-            return
-        
-        confirm_text = get_string('history_delete_confirm', chat_lang)
-        yes_button = InlineKeyboardButton(get_string('history_delete_yes', chat_lang), callback_data=f"delete_history_execute:{original_msg_id}")
-        cancel_button = InlineKeyboardButton(get_string('history_delete_cancel', chat_lang), callback_data=f"history_nav:{original_msg_id}:{current_offset}")
-        
-        keyboard = [[yes_button, cancel_button]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(confirm_text, reply_markup=reply_markup)
-        await query.answer()
-        return
-        
-    elif action == "delete_history_execute":
-        if len(data_parts) < 2:
-            await query.answer("Missing data for delete execution", show_alert=True)
-            return
-        try:
-            original_msg_id = int(data_parts[1]) # Keep for potential future use
-        except ValueError:
-            await query.answer("Invalid data format for delete execution", show_alert=True)
-            return
-            
-        success = await delete_chat_history(pool, chat_id)
-        
-        if success:
-            await query.edit_message_text(get_string('history_deleted', chat_lang))
-            # Optional: Automatically navigate back to settings after deletion
-            # await settings_command(update, context) # Requires settings_command to handle callback query context
-        else:
-            await query.edit_message_text(get_string('history_delete_error', chat_lang))
-        await query.answer()
-        return
+        # Format header
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+        moscow_time_str = escape_markdown(moscow_time, version=2)
+        user_name = escape_markdown(original_user.full_name, version=2)
+        header = f"*{user_name}* \\| {moscow_time_str}"
+        reply_markup = create_action_buttons(original_msg_id, chat_lang)
+        current_summary_msg_id = db_record['summary_telegram_message_id'] # Get current message ID
 
-    elif action == "export_history":
-        if len(data_parts) < 2:
-            await query.answer("Missing data for export", show_alert=True)
-            return
-        try:
-            original_msg_id = int(data_parts[1]) # Keep for potential future use
-        except ValueError:
-            await query.answer("Invalid data format for export", show_alert=True)
-            return
+        # --- Handle Diagram Mode Redo ---
+        if current_mode == 'diagram':
+            logger.info(f"Redoing diagram for message {original_msg_id}...")
+            transcript_text = db_record['transcript_text'] # Need transcript for diagram
+            author_name = original_user.full_name # Use fetched name
             
-        await query.answer() # Acknowledge button press immediately
-        status_msg = await context.bot.send_message(chat_id, get_string('history_exporting', chat_lang))
-        
-        try:
-            history_records = await get_all_chat_history(pool, chat_id)
-            
-            if not history_records:
-                await status_msg.edit_text(get_string('history_export_empty', chat_lang))
+            diagram_data = await generate_diagram_data(transcript_text, chat_lang, author_name)
+            if not diagram_data:
+                error_msg = get_string('diagram_error_data', chat_lang)
+                # Edit the current message back to show the error
+                await context.bot.edit_message_caption(
+                     chat_id=chat_id, message_id=current_summary_msg_id,
+                     caption=f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}",
+                     reply_markup=reply_markup, parse_mode='MarkdownV2'
+                 )
                 return
                 
-            export_lines = []
-            moscow_tz = pytz.timezone('Europe/Moscow') # Ensure pytz is imported
-            
-            for record in history_records:
-                author_name = "Unknown User"
-                record_user_id = record.get('user_id')
-                if record_user_id:
-                    try:
-                        author_chat = await context.bot.get_chat(record_user_id)
-                        author_name = author_chat.full_name or author_name
-                    except Exception as name_e:
-                        logger.warning(f"Could not fetch author name for user_id {record_user_id} during export: {name_e}")
-                        author_name = f"User ID {record_user_id}"
-                        
-                created_at_utc = record['created_at']
-                created_at_moscow = created_at_utc.astimezone(moscow_tz) if created_at_utc else None
-                time_str = created_at_moscow.strftime('%Y-%m-%d %H:%M:%S МСК') if created_at_moscow else "(no date)"
+            mermaid_code_body = create_mermaid_syntax(diagram_data, chat_lang) # Changed variable name
+            if mermaid_code_body is None: # Check for None explicitly
+                error_msg = get_string('diagram_error_syntax', chat_lang)
+                # Edit the current message back to show the error
+                await context.bot.edit_message_caption(
+                     chat_id=chat_id, message_id=current_summary_msg_id,
+                     caption=f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}",
+                     reply_markup=reply_markup, parse_mode='MarkdownV2'
+                 )
+                return
                 
-                mode_key = record.get('mode', 'unknown')
-                localized_mode_name = get_mode_name(mode_key, chat_lang)
+            diagram_png = render_mermaid_to_png(mermaid_code_body, diagram_data, chat_lang) # Pass mermaid_code_body
+            if not diagram_png:
+                error_msg = get_string('diagram_error_render', chat_lang)
+                # Edit the current message back to show the error
+                await context.bot.edit_message_caption(
+                     chat_id=chat_id, message_id=current_summary_msg_id,
+                     caption=f"{header}\n\n{escape_markdown_preserve_formatting(error_msg)}",
+                     reply_markup=reply_markup, parse_mode='MarkdownV2'
+                 )
+                return
                 
-                summary = record.get('summary_text', None)
-                transcript = record.get('transcript_text', None)
-                text_to_display = summary if summary is not None else transcript if transcript is not None else "(empty)"
-                
-                # Basic formatting for the TXT file
-                export_lines.append(f"--- Entry ---")
-                export_lines.append(f"Time: {time_str}")
-                export_lines.append(f"Author: {author_name}")
-                export_lines.append(f"Mode: {localized_mode_name}")
-                export_lines.append(f"Content:\n{text_to_display}")
-                export_lines.append("\n") # Add a blank line between entries
-
-            history_str = "\n".join(export_lines)
-            # Corrected datetime usage
-            file_name = f"history_{chat_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            
-            f = io.BytesIO(history_str.encode('utf-8'))
-            f.name = file_name
-            
-            await context.bot.send_document(chat_id=chat_id, document=f)
-            await status_msg.edit_text(get_string('history_export_complete', chat_lang))
-            
-        except Exception as e:
-            logger.error(f"Error exporting history for chat {chat_id}: {e}", exc_info=True)
+            # --- Send Diagram (Delete old, send new) ---
+            # Note: Using the *query's* message ID which is the *summary message* ID
+            new_summary_message = None
             try:
-                await status_msg.edit_text(get_string('history_export_error', chat_lang))
-            except Exception as edit_e:
-                logger.error(f"Failed to edit export status message after error: {edit_e}")
-        return
-
-    # --- Original Message Callbacks (Confirm, Mode, Redo, History Nav, Pin, etc.) ---
-    if action in ["confirm", "mode_select", "mode_set", "redo", "history", "history_nav", 
-                  "set_default_mode", "cancel_mode_select", "show_pin_menu", "back_to_message"]:
-        if len(data_parts) < 2:
-            await query.answer("Missing message ID", show_alert=True)
-            return
-            
-        original_msg_id = int(data_parts[1])
-        
-        # Handle different button actions for original messages
-        if action == "confirm":
-            # Just acknowledge and do nothing - user is satisfied
-            await query.edit_message_reply_markup(reply_markup=None)
-            return
-            
-        elif action == "mode_select":
-            await show_mode_selection(update, context, original_msg_id)
-            return
-            
-        elif action == "mode_set":
-            await mode_set(update, context, data_parts, original_msg_id)
-            return
-            
-        elif action == "redo":
-            await redo(update, context, original_msg_id)
-            return
-            
-        elif action == "history":
-            await handle_history_navigation(update, context, data_parts)
-            return
-            
-        elif action == "history_nav":
-            await handle_history_navigation(update, context, data_parts)
-            return
-            
-        elif action == "show_pin_menu":
-            await show_pin_menu(update, context, original_msg_id)
-            return
-            
-        elif action == "set_default_mode":
-            if len(data_parts) < 3:
-                await query.answer("Missing mode parameter", show_alert=True)
-                return
+                # Delete the processing message (which was the previous summary message)
+                await context.bot.delete_message(chat_id=chat_id, message_id=current_summary_msg_id)
+                logger.info(f"Deleted previous message {current_summary_msg_id} before sending redone diagram")
                 
-            mode = data_parts[2]
-            if mode not in SUPPORTED_MODES:
-                await query.answer("Unsupported mode", show_alert=True)
-                return
-                
-            # Set this mode as default for the chat
-            success = await set_chat_default_mode(pool, chat_id, mode)
-            if success:
-                # Get mode name in current chat language
-                mode_name = get_mode_name(mode, chat_lang)
-                confirm_message = f"Mode '{mode_name}' set as default"
-                if chat_lang == 'ru':
-                    confirm_message = f"Режим '{mode_name}' установлен по умолчанию"
-                elif chat_lang == 'kk':
-                    confirm_message = f"Режим '{mode_name}' әдепкі бойынша орнатылды"
-                
-                await query.answer(confirm_message, show_alert=True)
-                
-                # Return to mode selection with updated default
-                await show_mode_selection(update, context, original_msg_id)
-            else:
-                # Error message in current chat language
-                error_message = "Failed to set default mode"
-                if chat_lang == 'ru':
-                    error_message = "Не удалось установить режим по умолчанию"
-                elif chat_lang == 'kk':
-                    error_message = "Әдепкі режимді орнату сәтсіз аяқталды"
-                
-                await query.answer(error_message, show_alert=True)
-            return
-            
-        elif action == "cancel_mode_select":
-            # Return to normal action buttons
-            await query.edit_message_reply_markup(reply_markup=create_action_buttons(original_msg_id, chat_lang))
-            return
-            
-        elif action == "back_to_message":
-            if len(data_parts) < 2:
-                await query.answer("Missing message ID", show_alert=True)
-                return
-                
-            try:
-                original_msg_id = int(data_parts[1])
-            except (ValueError, TypeError):
-                await query.answer("Invalid message ID", show_alert=True)
-                return
-            
-            # Get the record from the database to retrieve mode and transcript
-            db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
-            if not db_record:
-                logger.error(f"Record not found for message {original_msg_id}")
-                await query.answer("Could not find the original message", show_alert=True)
-                return
-                
-            # Re-create the original message with action buttons
-            try:
-                # Similar to what we do in mode_set - format the message
-                user_id = db_record['user_id']
-                mode = db_record['mode']
-                display_text = db_record['summary_text'] if db_record['summary_text'] else db_record['transcript_text']
-                
-                # Get user info for the header
-                original_user = await context.bot.get_chat(user_id)
-                original_date = query.message.date  # Use current date as fallback
-                
-                # Format message header
-                moscow_tz = pytz.timezone('Europe/Moscow')
-                moscow_time = original_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-                moscow_time_str = escape_markdown(moscow_time, version=2)
-                user_name = escape_markdown(original_user.full_name, version=2)
-                header = f"*{user_name}* \\| {moscow_time_str}"
-                
-                # Format the display text with markdown
-                escaped_display_text = escape_markdown_preserve_formatting(display_text)
-                final_text = f"{header}\n\n{escaped_display_text}"
-                
-                # Edit message with original action buttons
-                await query.edit_message_text(
-                    final_text,
-                    reply_markup=create_action_buttons(original_msg_id, chat_lang),
-                    parse_mode=ParseMode.MARKDOWN_V2
+                # Send the new photo message, replying to the original voice message
+                new_summary_message = await context.bot.send_photo(
+                    chat_id=chat_id, 
+                    photo=diagram_png, 
+                    caption=header, 
+                    parse_mode='MarkdownV2',
+                    reply_markup=reply_markup,
+                    reply_to_message_id=original_msg_id # Reply to the voice message
                 )
-            except Exception as e:
-                logger.error(f"Error returning to message {original_msg_id}: {e}", exc_info=True)
-                await query.answer("Error returning to message", show_alert=True)
+                # Update DB with the NEW message ID
+                await update_summary_mode_and_text(
+                    pool=pool, record_id=record_id, new_mode=current_mode, 
+                    new_summary_text=mermaid_code_body, # Save mermaid code
+                    new_transcript_text=transcript_text,
+                    new_summary_message_id=new_summary_message.message_id # IMPORTANT: Update message ID
+                )
+                logger.info(f"Successfully redid diagram for message {original_msg_id}, new message ID: {new_summary_message.message_id}")
+            except Exception as send_err:
+                logger.error(f"Error deleting old message or sending redone diagram: {send_err}", exc_info=True)
+                # Attempt to revert to an error text message if sending fails
+                try:
+                     # Try sending a new message as the old one might be deleted
+                     await context.bot.send_message(
+                          chat_id=chat_id,
+                          text=f"{header}\n\n{escape_markdown_preserve_formatting(get_string('error', chat_lang))}",
+                          reply_to_message_id=original_msg_id, # Reply to original voice message
+                          reply_markup=reply_markup, # Add buttons back
+                          parse_mode='MarkdownV2'
+                     )
+                except Exception as final_err:
+                     logger.error(f"Failed to send fallback error message after redo diagram failure: {final_err}")
+            await query.answer() # Acknowledge completion (or failure) of the action
+            return # Finished diagram redo
             
-            return
-    
-    # If we get here, we didn't handle the action
-    logger.warning(f"Unhandled button callback action: {action}")
-    await query.answer("Unhandled action / Необработанное действие")
+        # --- Handle Text Mode Redo ---
+        else:
+            logger.info(f"Redoing text mode '{current_mode}' for message {original_msg_id}...")
+            summary_text = None
+            transcript_text = db_record['transcript_text'] # Keep original transcript
+            
+            # Re-download the audio file
+            with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
+                file = await context.bot.get_file(audio_file_id)
+                await file.download_to_drive(custom_path=temp_audio_file.name)
+                logger.info(f"Re-downloaded audio {audio_file_id} for redo.")
+                
+                # Process audio with current mode
+                summary_text, new_transcript = await process_audio_with_gemini(temp_audio_file.name, current_mode, chat_lang)
+                # It's possible Gemini gives a slightly different transcript on redo, update if needed
+                if new_transcript:
+                    transcript_text = new_transcript 
+            
+            if current_mode == 'as_is' or current_mode == 'transcript':
+                display_text = transcript_text
+            else:
+                display_text = summary_text # Use the newly generated summary
+            
+            if not display_text:
+                logger.error(f"Failed to generate content for mode {current_mode} during redo")
+                await query.edit_message_text(
+                    get_string('error_generating_summary', chat_lang), # Use generic summary error string
+                    reply_markup=create_action_buttons(original_msg_id, chat_lang)
+                )
+                return
+            
+            escaped_display_text = escape_markdown_preserve_formatting(display_text)
+            final_text = f"{header}\n\n{escaped_display_text}"
+            
+            # --- Edit Message (Text or Photo Caption) ---
+            # Edit the *current* summary message ID
+            sent_message = None
+            try:
+                 # Try editing as a text message first
+                 sent_message = await context.bot.edit_message_text(
+                      final_text,
+                      chat_id=chat_id,
+                      message_id=current_summary_msg_id,
+                      reply_markup=reply_markup,
+                      parse_mode=ParseMode.MARKDOWN_V2
+                 )
+                 logger.info(f"Edited text message {current_summary_msg_id} for redo mode '{current_mode}'")
+            except Exception: # If that fails, assume it was a photo and try editing caption
+                 try:
+                      sent_message = await context.bot.edit_message_caption(
+                           chat_id=chat_id,
+                           message_id=current_summary_msg_id,
+                           caption=final_text,
+                           reply_markup=reply_markup,
+                           parse_mode=ParseMode.MARKDOWN_V2
+                      )
+                      logger.info(f"Edited photo caption {current_summary_msg_id} for redo mode '{current_mode}'")
+                 except Exception as edit_err:
+                      logger.error(f"Failed to edit message text or caption for redo mode '{current_mode}': {edit_err}", exc_info=True)
+                      await query.answer(get_string('error', chat_lang), show_alert=True)
+                      return
+
+            # Update database with new summary/transcript, keeping the same message ID
+            await update_summary_mode_and_text(
+                pool=pool,
+                record_id=record_id,
+                new_mode=current_mode, # Mode stays the same
+                new_summary_text=summary_text,
+                new_transcript_text=transcript_text,
+                new_summary_message_id=sent_message.message_id # Update message ID
+            )
+            logger.info(f"Successfully redid text mode '{current_mode}' for message {original_msg_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in redo: {e}", exc_info=True)
+        try:
+            await query.edit_message_text(
+                get_string('error', chat_lang), # Use generic error
+                reply_markup=create_action_buttons(original_msg_id, chat_lang)
+            )
+        except Exception as edit_e:
+            logger.error(f"Failed to edit message after error in redo: {edit_e}")
+    await query.answer() # Acknowledge completion or failure
 
 if __name__ == "__main__":
     main() 
