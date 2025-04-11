@@ -15,7 +15,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup # Added
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from telegram.constants import ChatAction, ParseMode # Added ParseMode
 from telegram.helpers import escape_markdown as telegram_escape_markdown # Added for V2, renamed to avoid confusion
-from telegram import error as telegram_error # Added to fix NameError with telegram.error.BadRequest
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
@@ -1004,7 +1003,7 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
         await query.answer(error_message, show_alert=True)
 
 async def show_settings_mode_menu(update: Update, context: CallbackContext):
-    """Show the settings menu for selecting default mode."""
+    """Shows a menu for setting the default mode from settings."""
     query = update.callback_query
     chat_id = update.effective_chat.id
     pool = context.bot_data.get('db_pool')
@@ -1015,13 +1014,6 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     
     # Get chat's current language
     chat_lang = await get_chat_language(pool, chat_id)
-    
-    # Get current default mode
-    current_default_mode = DEFAULT_MODE
-    try:
-        current_default_mode = await get_chat_default_mode(pool, chat_id, DEFAULT_MODE)
-    except Exception as e:
-        logger.error(f"Error getting default mode: {e}")
     
     # Create mode selection keyboard
     keyboard = []
@@ -1040,25 +1032,39 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     # Define the order of modes
     mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
     
-    # Localized title
-    title = "Select default mode:"
-    if chat_lang == 'ru':
-        title = "Выберите режим по умолчанию:"
-    elif chat_lang == 'kk':
-        title = "Әдепкі режимді таңдаңыз:"
+    # Get current default mode
+    current_default_mode = DEFAULT_MODE
+    try:
+        current_default_mode = await get_chat_default_mode(pool, chat_id, DEFAULT_MODE)
+    except Exception as e:
+        logger.error(f"Error getting default mode: {e}")
     
-    # Add each mode selection button
+    # Localized button texts
+    back_label = "⬅️ Назад"
+    
+    if chat_lang == 'en':
+        back_label = "⬅️ Back"
+    elif chat_lang == 'kk':
+        back_label = "⬅️ Артқа"
+    
+    # Localized heading text
+    heading_text = "Select default mode for voice messages:"
+    if chat_lang == 'ru':
+        heading_text = "Выберите режим по умолчанию для голосовых сообщений:"
+    elif chat_lang == 'kk':
+        heading_text = "Дауыстық хабарламалар үшін әдепкі режимді таңдаңыз:"
+    
+    # Add each mode with selection indicator
     for mode_key in mode_order:
         if mode_key in SUPPORTED_MODES:
             emoji = mode_emojis.get(mode_key, "")
             # Get localized mode name
             mode_name = get_mode_name(mode_key, chat_lang)
             
-            # Add indicator if this is the default mode
+            # Add selection indicator
             if mode_key == current_default_mode:
-                mode_name = f"{mode_name} ★"
-            
-            # Mode selection button
+                mode_name = f"{mode_name} ✓"
+                
             keyboard.append([
                 InlineKeyboardButton(
                     f"{emoji} {mode_name}", 
@@ -1068,28 +1074,30 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     
     # Add back button
     keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="settings")
+        InlineKeyboardButton(
+            back_label, 
+            callback_data="settings"
+        )
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     try:
-        # First try to update only the reply markup (works for photo/voice messages)
-        await query.edit_message_reply_markup(reply_markup=reply_markup)
-        
-        # Then, if message is a text message, try to update the text as well
-        try:
-            await query.edit_message_text(title, reply_markup=reply_markup)
-        except telegram_error.BadRequest as text_error:
-            # If editing text fails, just log it - we already updated the markup
-            logger.debug(f"Could not update message text for settings mode menu (likely not a text message): {text_error}")
+        await query.edit_message_text(
+            heading_text,
+            reply_markup=reply_markup
+        )
+        logger.info(f"Showed settings mode menu for chat {chat_id} in language {chat_lang}")
     except Exception as e:
         logger.error(f"Error showing settings mode menu: {e}", exc_info=True)
-        error_message = "Error showing mode options"
+        
+        # Error message based on chat language
+        error_message = "Error showing mode settings"
         if chat_lang == 'ru':
-            error_message = "Ошибка при отображении опций режима"
+            error_message = "Ошибка при отображении настроек режима"
         elif chat_lang == 'kk':
-            error_message = "Режим опцияларын көрсету кезінде қате"
+            error_message = "Режим параметрлерін көрсету кезінде қате"
+            
         await query.answer(error_message, show_alert=True)
 
 # --- Command Handlers ---
@@ -1813,29 +1821,7 @@ async def button_callback(update: Update, context: CallbackContext):
         elif chat_lang == 'kk':
             welcome_text = "Опцияны таңдаңыз:"
             
-        try:
-            # First try to update only the reply markup (works for voice messages)
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-            # Then, if message is a text message, try to update the text as well
-            # This additional step is wrapped in try-except so it doesn't fail for voice/photo messages
-            try:
-                await query.edit_message_text(welcome_text, reply_markup=reply_markup)
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already updated the markup
-                logger.debug(f"Could not update message text for settings (likely not a text message): {text_error}")
-                pass
-                
-        except Exception as e:
-            logger.error(f"Error updating message for settings: {e}", exc_info=True)
-            error_message = "Error opening settings"
-            if chat_lang == 'ru':
-                error_message = "Ошибка при открытии настроек"
-            elif chat_lang == 'kk':
-                error_message = "Параметрлерді ашу қатесі"
-            await query.answer(error_message, show_alert=True)
-            return
-            
+        await query.edit_message_text(welcome_text, reply_markup=reply_markup)
         await query.answer()
         return
     
@@ -1884,25 +1870,11 @@ async def button_callback(update: Update, context: CallbackContext):
             [InlineKeyboardButton(settings_label, callback_data="settings")]
         ])
         
-        try:
-            # First try to update only the reply markup
-            await query.edit_message_reply_markup(reply_markup=help_buttons)
-            
-            # Then try to update the text content if possible
-            try:
-                await query.edit_message_text(
-                    get_string('help', chat_lang),
-                    reply_markup=help_buttons,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already updated the markup
-                logger.debug(f"Could not update message text for help (likely not a text message): {text_error}")
-        except Exception as e:
-            logger.error(f"Error showing help: {e}", exc_info=True)
-            await query.answer("Error showing help", show_alert=True)
-        
-        await query.answer()
+        await query.edit_message_text(
+            get_string('help', chat_lang),
+            reply_markup=help_buttons,
+            parse_mode=ParseMode.MARKDOWN
+        )
         return
     
     # Handle voice language menu
@@ -1975,24 +1947,11 @@ async def button_callback(update: Update, context: CallbackContext):
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            # First try to update only the reply markup
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-            # Then try to update the text content if possible
-            try:
-                await query.edit_message_text(
-                    get_string('choose_language', chat_lang),
-                    reply_markup=reply_markup
-                )
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already updated the markup
-                logger.debug(f"Could not update message text for language menu (likely not a text message): {text_error}")
-        except Exception as e:
-            logger.error(f"Error showing language menu: {e}", exc_info=True)
-            await query.answer("Error showing language options", show_alert=True)
-            
-        await query.answer()
+        # Send language selection message
+        await query.edit_message_text(
+            get_string('choose_language', chat_lang),
+            reply_markup=reply_markup
+        )
         return
     
     elif action == "subscription_info":
@@ -2000,45 +1959,19 @@ async def button_callback(update: Update, context: CallbackContext):
         keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="settings")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            # First try to update only the reply markup
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-            # Then try to update the text content if possible
-            try:
-                await query.edit_message_text(
-                    get_string('subscription_info', chat_lang),
-                    reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already updated the markup
-                logger.debug(f"Could not update message text for subscription info (likely not a text message): {text_error}")
-        except Exception as e:
-            logger.error(f"Error showing subscription info: {e}", exc_info=True)
-            await query.answer("Error showing subscription information", show_alert=True)
-            
-        await query.answer()
+        # Send subscription info
+        await query.edit_message_text(
+            get_string('subscription_info', chat_lang),
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.MARKDOWN
+        )
         return
     
     elif action == "close_settings":
-        try:
-            # First try to remove the keyboard
-            await query.edit_message_reply_markup(reply_markup=None)
-            
-            # Then try to update the text if possible
-            try:
-                await query.edit_message_text(get_string('settings', chat_lang) + " ✅")
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already removed the keyboard
-                logger.debug(f"Could not update message text when closing settings (likely not a text message): {text_error}")
-        except Exception as e:
-            logger.error(f"Error closing settings: {e}", exc_info=True)
-            # Just answer the callback without showing an alert
-        
-        await query.answer()
+        # Just remove the keyboard and change text
+        await query.edit_message_text(get_string('settings', chat_lang) + " ✅")
         return
-        
+    
     # Handle settings mode menu
     elif action == "settings_mode_menu":
         await show_settings_mode_menu(update, context)
@@ -2100,20 +2033,7 @@ async def button_callback(update: Update, context: CallbackContext):
         keyboard = [[yes_button, cancel_button]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            # First try to update only the reply markup
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-            
-            # Then try to update the text content if possible
-            try:
-                await query.edit_message_text(confirm_text, reply_markup=reply_markup)
-            except telegram_error.BadRequest as text_error:
-                # If editing text fails, just log it - we already updated the markup
-                logger.debug(f"Could not update message text for delete confirmation (likely not a text message): {text_error}")
-        except Exception as e:
-            logger.error(f"Error showing delete confirmation: {e}", exc_info=True)
-            await query.answer("Error showing delete confirmation", show_alert=True)
-            
+        await query.edit_message_text(confirm_text, reply_markup=reply_markup)
         await query.answer()
         return
         
@@ -2329,24 +2249,12 @@ async def button_callback(update: Update, context: CallbackContext):
                 escaped_display_text = escape_markdown_preserve_formatting(display_text)
                 final_text = f"{header}\n\n{escaped_display_text}"
                 
-                # First, try to update only the reply markup - works for all message types
-                await query.edit_message_reply_markup(
-                    reply_markup=create_action_buttons(original_msg_id, chat_lang)
+                # Edit message with original action buttons
+                await query.edit_message_text(
+                    final_text,
+                    reply_markup=create_action_buttons(original_msg_id, chat_lang),
+                    parse_mode=ParseMode.MARKDOWN_V2
                 )
-                
-                # Then, if it's a text message, try to update the text content
-                # This is in a separate try-except since it will fail for photo/voice messages 
-                try:
-                    await query.edit_message_text(
-                        final_text,
-                        reply_markup=create_action_buttons(original_msg_id, chat_lang),
-                        parse_mode=ParseMode.MARKDOWN_V2
-                    )
-                except telegram_error.BadRequest as text_error:
-                    # If editing text fails, just log it - we already updated the markup
-                    logger.debug(f"Could not update message text for back_to_message (likely not a text message): {text_error}")
-                    # Continue normally - we already updated the reply markup successfully
-                
             except Exception as e:
                 logger.error(f"Error returning to message {original_msg_id}: {e}", exc_info=True)
                 await query.answer("Error returning to message", show_alert=True)
