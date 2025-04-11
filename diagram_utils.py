@@ -75,11 +75,12 @@ async def generate_diagram_data(transcript: str, language: str, author_name: str
     3. CAREFULLY CONSIDER WHICH DIAGRAM TYPE WOULD BEST REPRESENT THIS CONTENT:
        - Choose the diagram type that will most effectively visualize the content in a portrait orientation seen from mobile devices
        - Your options to consider (but the decision is yours):
-         * mindmap: Great for ideas, concepts, features, or related topics (try to use this the most)
+         * mindmap: Great for ideas, concepts, features, or related topics (try to use this often)
          * flowchart TD: Useful for processes, decisions, or hierarchical structures
          * sequenceDiagram: Good for interactions, step-by-step processes, or timelines
          * classDiagram: Helpful for showing relationships between components
        - Don't feel restricted - use your judgment to pick the most suitable type for this specific content
+       - Never user parentheses for node text.
 
     4. CRITICAL MINDMAP RULES (if you choose mindmap):
         - A mindmap MUST have exactly ONE root node - no more!
@@ -596,6 +597,12 @@ def render_mermaid_to_png(mermaid_code_body: str, diagram_data: dict, language: 
 
                 # Open the logo image
                 logo_img = Image.open(logo_path).convert("RGBA") # Ensure RGBA
+
+                # Set logo opacity to 60%
+                alpha = logo_img.split()[-1] # Get the alpha channel
+                # Create a new alpha channel with 60% opacity (0.6 * 255 = 153)
+                new_alpha = alpha.point(lambda p: int(p * 0.6))
+                logo_img.putalpha(new_alpha)
 
                 # Resize logo to reasonable size (e.g., 10% of the width)
                 logo_width = diagram_img.width // 10
