@@ -88,6 +88,9 @@ RUN echo '{ \
   ] \
 }' > /app/puppeteerConfigFile.json
 
+# Set environment variable for the config file path
+ENV PUPPETEER_CONFIG_PATH=/app/puppeteerConfigFile.json
+
 # Copy the requirements file into the container at /app
 COPY requirements.txt .
 
