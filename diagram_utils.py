@@ -106,6 +106,7 @@ async def generate_diagram_data(transcript: str, language: str, author_name: str
     6. CRITICAL SYNTAX RULES TO FOLLOW:
        - NEVER use double quotes (") inside node labels - use single quotes (') instead
        - Keep node text concise - use at most 5-7 words per node
+       - Node text MUST absolutely stay on a single line. NEVER include literal newline characters (`\n`) within the text content defined inside node brackets `[...]` or parentheses `(...)`. Keep text concise.
        - For flowcharts, use proper node format: A[Text without quotes] or A(Simple text)
        - Avoid special characters in node IDs - use only letters, numbers, and underscores
        - Ensure all node IDs are unique - don't reuse the same ID

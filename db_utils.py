@@ -204,6 +204,25 @@ async def update_summary_diagram_and_message_id(
             logger.error(f"Error updating summary record {record_id} with diagram data: {e}", exc_info=True)
             return False
 
+async def update_summary_message_id(
+    pool: asyncpg.Pool,
+    record_id: int,
+    new_message_id: int
+):
+    """Updates only the summary_telegram_message_id for a record."""
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                UPDATE summaries
+                SET summary_telegram_message_id = $1
+                WHERE id = $2;
+            """, new_message_id, record_id)
+            logger.info(f"Updated summary record {record_id} with new message ID {new_message_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating message ID for summary record {record_id}: {e}", exc_info=True)
+            return False
+
 # --- User preferences functions ---
 
 async def get_user_language(pool: asyncpg.Pool, user_id: int, default_language: str = 'ru') -> str:

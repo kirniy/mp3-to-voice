@@ -13,7 +13,7 @@ import json
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup # Added
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
-from telegram.constants import ChatAction, ParseMode # Added ParseMode
+from telegram.constants import ChatAction, ParseMode, MessageLimit # Added MessageLimit
 from telegram.helpers import escape_markdown as telegram_escape_markdown # Added for V2, renamed to avoid confusion
 from telegram import error as telegram_error # Added to fix NameError with telegram.error.BadRequest
 
@@ -481,8 +481,34 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
     
     # Show processing indicator with localized mode name
     mode_name = get_mode_name(new_mode, chat_lang)
-    await query.edit_message_text(f"⏳ {mode_name}...", reply_markup=None)
-    
+    status_text = f"⏳ {mode_name}..."
+    try:
+        if query.message.photo:
+            # Edit caption if it's a photo message (diagram)
+            await query.edit_message_caption(caption=status_text, reply_markup=None)
+            logger.debug(f"Edited caption for photo message {query.message.message_id} to show processing status.")
+        elif query.message.text:
+            # Edit text if it's a text message (summary/transcript)
+            await query.edit_message_text(text=status_text, reply_markup=None)
+            logger.debug(f"Edited text for message {query.message.message_id} to show processing status.")
+        else:
+            # Fallback or handle other message types if necessary
+            logger.warning(f"Cannot set processing status for message type of message {query.message.message_id}")
+            await query.answer(f"Processing {mode_name}...") # Provide feedback via answer
+
+    except telegram_error.BadRequest as e:
+        # Log the specific error but try to continue
+        logger.warning(f"Could not edit message to show status (message ID: {query.message.message_id}): {e}. Likely trying to edit a deleted message or insufficient permissions. Attempting to continue...")
+        # Answer the callback as a fallback way to give feedback
+        await query.answer(status_text)
+    except Exception as e:
+        # Log other potential errors
+        logger.error(f"Unexpected error setting processing status for message {query.message.message_id}: {e}", exc_info=True)
+        # Answer callback to prevent hanging
+        await query.answer("Processing...")
+
+    # await query.edit_message_text(f"⏳ {mode_name}...", reply_markup=None)
+
     try:
         # Get the record from the database
         db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
@@ -632,12 +658,49 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         final_text = f"{header}\n\n{escaped_display_text}"
         
         # Update message with new summary and buttons
-        await query.edit_message_text(
-            final_text,
-            reply_markup=create_action_buttons(original_msg_id, chat_lang),
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-        
+        # Conditionally edit text or caption, handle caption length
+        try:
+            reply_buttons = create_action_buttons(original_msg_id, chat_lang)
+
+            if query.message.photo:
+                if len(final_text) > MessageLimit.CAPTION_LENGTH:
+                    # Caption too long, delete photo and send new text message
+                    logger.warning(f"Caption too long ({len(final_text)} chars) for message {query.message.message_id}. Sending new text message instead.")
+                    await query.message.delete()
+                    # Send new text message
+                    new_sent_message = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=final_text,
+                        reply_markup=reply_buttons,
+                        parse_mode=ParseMode.MARKDOWN_V2,
+                        reply_to_message_id=original_msg_id # Reply to the original voice message
+                    )
+                    # Update the message ID in the database
+                    from db_utils import update_summary_message_id # Import here to avoid circular dependency at top level
+                    await update_summary_message_id(pool, record_id, new_sent_message.message_id)
+                else:
+                    # Caption fits, edit caption
+                    await query.edit_message_caption(
+                        caption=final_text,
+                        reply_markup=reply_buttons,
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+            elif query.message.text:
+                 # Edit text message
+                 await query.edit_message_text(
+                    text=final_text,
+                    reply_markup=reply_buttons,
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            else:
+                logger.warning(f"Cannot display final result for message type {type(query.message)} in mode_set")
+        except telegram_error.BadRequest as e:
+            logger.error(f"BadRequest updating final message content in mode_set (msg ID: {query.message.message_id}): {e}", exc_info=True)
+        except Exception as e:
+             logger.error(f"Unexpected error updating final message content in mode_set (msg ID: {query.message.message_id}): {e}", exc_info=True)
+
+        # await query.edit_message_text(...)
+
         # Update database with new summary
         await update_summary_mode_and_text(
             pool=pool,
@@ -674,8 +737,33 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         return
     
     # Show processing indicator
-    await query.edit_message_text("⏳ Переделываю сводку...", reply_markup=None)
-    
+    # Get chat's language first to localize status
+    chat_lang = await get_chat_language(pool, chat_id)
+    status_text = get_string('redo_processing', chat_lang)
+
+    try:
+        if query.message.photo:
+            # Edit caption if it's a photo message (diagram)
+            await query.edit_message_caption(caption=status_text, reply_markup=None)
+            logger.debug(f"Edited caption for photo message {query.message.message_id} to show redo processing status.")
+        elif query.message.text:
+            # Edit text if it's a text message (summary/transcript)
+            await query.edit_message_text(text=status_text, reply_markup=None)
+            logger.debug(f"Edited text for message {query.message.message_id} to show redo processing status.")
+        else:
+            # Fallback or handle other message types if necessary
+            logger.warning(f"Cannot set redo processing status for message type of message {query.message.message_id}")
+            await query.answer(status_text) # Provide feedback via answer
+
+    except telegram_error.BadRequest as e:
+        logger.warning(f"Could not edit message to show redo status (message ID: {query.message.message_id}): {e}. Attempting to continue...")
+        await query.answer(status_text)
+    except Exception as e:
+        logger.error(f"Unexpected error setting redo processing status for message {query.message.message_id}: {e}", exc_info=True)
+        await query.answer("Processing...")
+
+    # await query.edit_message_text("⏳ Переделываю сводку...", reply_markup=None)
+
     try:
         # Get the record from the database
         db_record = await get_summary_context_for_callback(pool, original_msg_id, chat_id)
@@ -812,12 +900,47 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         final_text = f"{header}\n\n{escaped_display_text}"
         
         # Update message with new summary and buttons
-        await query.edit_message_text(
-            final_text,
-            reply_markup=create_action_buttons(original_msg_id, chat_lang),
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-        
+        # Conditionally edit text or caption, handle caption length
+        try:
+            reply_buttons = create_action_buttons(original_msg_id, chat_lang)
+
+            if query.message.photo:
+                if len(final_text) > MessageLimit.CAPTION_LENGTH:
+                    # Caption too long, delete photo and send new text message
+                    logger.warning(f"Caption too long ({len(final_text)} chars) for message {query.message.message_id} in redo. Sending new text message instead.")
+                    await query.message.delete()
+                    # Send new text message
+                    new_sent_message = await context.bot.send_message(
+                        chat_id=chat_id,
+                        text=final_text,
+                        reply_markup=reply_buttons,
+                        parse_mode=ParseMode.MARKDOWN_V2,
+                        reply_to_message_id=original_msg_id # Reply to the original voice message
+                    )
+                    # Update the message ID in the database
+                    from db_utils import update_summary_message_id # Import here
+                    await update_summary_message_id(pool, record_id, new_sent_message.message_id)
+                else:
+                     # Caption fits, edit caption
+                     await query.edit_message_caption(
+                        caption=final_text,
+                        reply_markup=reply_buttons,
+                        parse_mode=ParseMode.MARKDOWN_V2
+                    )
+            elif query.message.text:
+                 # Edit text message
+                 await query.edit_message_text(
+                    text=final_text,
+                    reply_markup=reply_buttons,
+                    parse_mode=ParseMode.MARKDOWN_V2
+                )
+            else:
+                logger.warning(f"Cannot display final result for message type {type(query.message)} in redo")
+        except telegram_error.BadRequest as e:
+            logger.error(f"BadRequest updating final message content in redo (msg ID: {query.message.message_id}): {e}", exc_info=True)
+        except Exception as e:
+             logger.error(f"Unexpected error updating final message content in redo (msg ID: {query.message.message_id}): {e}", exc_info=True)
+
         # Update database with new summary
         await update_summary_mode_and_text(
             pool=pool,
