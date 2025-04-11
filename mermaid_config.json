@@ -1,0 +1,24 @@
+{
+  "theme": "default",
+  "themeVariables": {
+    "primaryColor": "#3498db",
+    "primaryTextColor": "#fff",
+    "primaryBorderColor": "#2779bd",
+    "lineColor": "#555",
+    "secondaryColor": "#6c757d",
+    "tertiaryColor": "#f8f9fa"
+  },
+  "fontFamily": "sans-serif",
+  "fontSize": 16,
+  "flowchart": {
+    "htmlLabels": true,
+    "curve": "basis"
+  },
+  "sequence": {
+    "mirrorActors": true,
+    "bottomMarginAdj": 10
+  },
+  "mindmap": {
+    "padding": 8
+  }
+} 

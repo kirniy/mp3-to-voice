@@ -25,6 +25,7 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                     summary_bullet TEXT,
                     summary_combined TEXT,
                     summary_pasha TEXT,
+                    summary_diagram TEXT,
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
@@ -171,6 +172,26 @@ async def update_summary_mode_and_text(
             return True
         except Exception as e:
             logger.error(f"Error updating summary record {record_id}: {e}", exc_info=True)
+            return False
+
+async def update_summary_diagram_and_message_id(
+    pool: asyncpg.Pool, 
+    record_id: int, 
+    new_message_id: int, 
+    diagram_data: str | None
+):
+    """Updates the message ID and diagram data for a diagram summary record."""
+    async with pool.acquire() as connection:
+        try:
+            await connection.execute("""
+                UPDATE summaries
+                SET summary_telegram_message_id = $1, summary_diagram = $2
+                WHERE id = $3;
+            """, new_message_id, diagram_data, record_id)
+            logger.info(f"Updated summary record {record_id} with new message ID {new_message_id} and diagram data")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating summary record {record_id} with diagram data: {e}", exc_info=True)
             return False
 
 # --- User preferences functions ---

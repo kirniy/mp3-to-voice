@@ -9,6 +9,7 @@ import google.generativeai as genai # Added
 import pytz # Added
 from datetime import datetime # Added
 import re
+import json
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup # Added
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
@@ -17,8 +18,9 @@ from telegram.helpers import escape_markdown as telegram_escape_markdown # Added
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
-from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history # Added get_user_history
+from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, update_summary_diagram_and_message_id, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history # Added update_summary_diagram_and_message_id
 from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
+from diagram_utils import generate_diagram_data, create_mermaid_syntax, render_mermaid_to_png
 
 # Enable logging
 logging.basicConfig(
@@ -377,11 +379,12 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
         "bullet": "🔍",
         "combined": "📊",
         "as_is": "📄",
-        "pasha": "💊"
+        "pasha": "💊",
+        "diagram": "📈" # Using graph emoji for diagram mode
     }
     
     # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -391,7 +394,7 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
         logger.error(f"Error getting default mode: {e}")
     
     # Localized button texts
-    pin_label = "📌 Закрепить"
+    pin_label = "📌 "
     cancel_label = "❌ Отмена"
     
     if chat_lang == 'en':
@@ -476,19 +479,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
     chat_lang = await get_chat_language(pool, chat_id)
     
     # Show processing indicator with localized mode name
-    localized_mode_name = get_mode_name(new_mode, chat_lang)
-    
-    # Localized "Switching mode" message
-    switching_msg = f"⏳ Переключаю режим на '{localized_mode_name}'..."
-    if chat_lang == 'en':
-        switching_msg = f"⏳ Switching mode to '{localized_mode_name}'..."
-    elif chat_lang == 'kk':
-        switching_msg = f"⏳ '{localized_mode_name}' режиміне ауысу..."
-    
-    await query.edit_message_text(
-        switching_msg,
-        reply_markup=None
-    )
+    mode_name = get_mode_name(new_mode, chat_lang)
+    await query.edit_message_text(f"⏳ {mode_name}...", reply_markup=None)
     
     try:
         # Get the record from the database
@@ -505,39 +497,120 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         
         record_id = db_record['id']
         audio_file_id = db_record['telegram_audio_file_id']
+        current_mode = db_record['mode']
         user_id = db_record['user_id']
         
         # Get user info for the header
         original_user = await context.bot.get_chat(user_id)
         original_message_date = query.message.date
         
-        # Get existing summary for this mode if available
-        # If mode is 'brief', check if summary_brief exists in db_record
-        mode_field_name = f"summary_{new_mode}"
-        has_existing_summary = mode_field_name in db_record and db_record[mode_field_name]
+        # Re-download the audio file
+        with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
+            file = await context.bot.get_file(audio_file_id)
+            await file.download_to_drive(custom_path=temp_audio_file.name)
+            logger.info(f"Re-downloaded audio {audio_file_id} for mode change to {new_mode}.")
+            
+            # Process audio with new mode
+            summary_text, transcript_text = await process_audio_with_gemini(temp_audio_file.name, new_mode, chat_lang)
         
-        summary_text = None
-        transcript_text = db_record['transcript_text']
+        if transcript_text is None:
+            logger.error(f"Failed to get transcript for mode change, aborting")
+            await query.edit_message_text(
+                "🇬🇧 Error processing audio. Please try again.\n\n"
+                "🇷🇺 Ошибка при обработке аудио. Пожалуйста, попробуйте снова.",
+                reply_markup=create_action_buttons(original_msg_id, chat_lang)
+            )
+            return
         
-        # If we don't have a summary for this mode yet, process the audio again
-        if not has_existing_summary:
-            # Re-download the audio file
-            with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
-                file = await context.bot.get_file(audio_file_id)
-                await file.download_to_drive(custom_path=temp_audio_file.name)
-                logger.info(f"Re-downloaded audio {audio_file_id} for mode change.")
+        # Special handling for diagram mode
+        if new_mode == 'diagram':
+            # Update status message to indicate diagram generation
+            diagram_processing_msg = "⏳ Создание диаграммы..."
+            if chat_lang == 'en':
+                diagram_processing_msg = "⏳ Creating diagram..."
+            elif chat_lang == 'kk':
+                diagram_processing_msg = "⏳ Диаграмма жасау..."
                 
-                # Process audio with new mode
-                summary_text, new_transcript = await process_audio_with_gemini(temp_audio_file.name, new_mode, chat_lang)
+            await query.edit_message_text(diagram_processing_msg)
+            
+            # Generate diagram data from transcript
+            diagram_data = await generate_diagram_data(transcript_text, chat_lang, original_user.full_name)
+            
+            if diagram_data:
+                # Create PNG from diagram data
+                png_bytes = render_mermaid_to_png(
+                    create_mermaid_syntax(diagram_data, chat_lang),
+                    diagram_data,
+                    chat_lang
+                )
                 
-                # Use the new transcript if we got one, otherwise keep the existing one
-                if new_transcript:
-                    transcript_text = new_transcript
-        else:
-            # Use existing summary for this mode
-            summary_text = db_record[mode_field_name]
-            logger.info(f"Using existing {new_mode} summary from database")
+                if png_bytes:
+                    # Create bio with PNG bytes for sending as photo
+                    bio = io.BytesIO(png_bytes)
+                    bio.name = 'diagram.png'
+                    
+                    # Create caption with attribution
+                    moscow_tz = pytz.timezone('Europe/Moscow')
+                    moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+                    caption = f"{original_user.full_name} | {moscow_time}"
+                    
+                    # Send the diagram as a new photo message
+                    new_message = await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=bio,
+                        caption=caption,
+                        reply_markup=create_action_buttons(original_msg_id, chat_lang),
+                        reply_to_message_id=original_msg_id
+                    )
+                    
+                    # Save diagram data as JSON string
+                    try:
+                        diagram_json = json.dumps(diagram_data, ensure_ascii=False)
+                    except:
+                        diagram_json = None
+                    
+                    # Delete the old summary message
+                    await query.message.delete()
+                    
+                    # Update the database with the new mode and text
+                    await update_summary_mode_and_text(
+                        pool=pool,
+                        record_id=record_id,
+                        new_mode=new_mode,
+                        new_summary_text=diagram_json,
+                        new_transcript_text=transcript_text
+                    )
+                    
+                    # Update the message ID and diagram data 
+                    await update_summary_diagram_and_message_id(
+                        pool=pool,
+                        record_id=record_id,
+                        new_message_id=new_message.message_id,
+                        diagram_data=diagram_json
+                    )
+                    
+                    logger.info(f"Successfully updated record {record_id} to diagram mode with new message {new_message.message_id}")
+                    return
+                else:
+                    logger.error("Failed to render diagram to PNG")
+            else:
+                logger.error("Failed to generate diagram data")
+            
+            # If we reach here, diagram generation failed
+            # Fall back to transcript mode
+            new_mode = 'as_is'
+            summary_text = transcript_text
         
+        # For non-diagram modes or if diagram generation failed, continue with regular processing
+        # Prepare final message text
+        # Format header with emoji
+        moscow_tz = pytz.timezone('Europe/Moscow')
+        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+        moscow_time_str = escape_markdown(moscow_time, version=2)
+        user_name = escape_markdown(original_user.full_name, version=2)
+        header = f"*{user_name}* \\| {moscow_time_str}"
+        
+        # Determine what text to display based on the mode
         if new_mode == 'as_is':
             display_text = transcript_text
         elif new_mode == 'transcript':
@@ -553,15 +626,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
                 return
             display_text = summary_text
         
-        # Format message with normal formatting (not code block)
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-        moscow_time_str = escape_markdown(moscow_time, version=2)
-        user_name = escape_markdown(original_user.full_name, version=2)
-        header = f"*{user_name}* \\| {moscow_time_str}"
-        
-        # Now format the display text with proper markdown
-        escaped_display_text = escape_markdown_preserve_formatting(display_text)
+        # Escape for MarkdownV2
+        escaped_display_text = escape_markdown(display_text, version=2)
         final_text = f"{header}\n\n{escaped_display_text}"
         
         # Update message with new summary and buttons
@@ -571,7 +637,7 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
             parse_mode=ParseMode.MARKDOWN_V2
         )
         
-        # Update database with new mode and summary
+        # Update database with new summary
         await update_summary_mode_and_text(
             pool=pool,
             record_id=record_id,
@@ -580,18 +646,20 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
             new_transcript_text=transcript_text
         )
         
-        logger.info(f"Successfully updated summary to mode {new_mode} for message {original_msg_id}")
+        logger.info(f"Successfully changed mode to {new_mode} for message {original_msg_id}")
         
     except Exception as e:
         logger.error(f"Error in mode_set: {e}", exc_info=True)
         try:
+            # Show error message
             await query.edit_message_text(
-                "🇬🇧 An error occurred. Please try again.\n\n"
-                "🇷🇺 Произошла ошибка. Пожалуйста, попробуйте снова.",
+                "🇬🇧 Error processing mode change. Please try again.\n\n"
+                "🇷🇺 Ошибка при смене режима. Пожалуйста, попробуйте снова.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
         except Exception as edit_e:
             logger.error(f"Failed to edit message after error: {edit_e}")
+            await query.answer("Error / Ошибка", show_alert=True)
 
 async def redo(update: Update, context: CallbackContext, original_msg_id: int):
     """Re-processes the voice message with the current mode."""
@@ -638,7 +706,86 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
             # Process audio with current mode
             summary_text, transcript_text = await process_audio_with_gemini(temp_audio_file.name, current_mode, chat_lang)
         
-        if current_mode == 'transcript':
+        # Get chat's language if not already retrieved
+        if 'chat_lang' not in locals():
+            chat_lang = await get_chat_language(pool, chat_id)
+        
+        # Special handling for diagram mode
+        if current_mode == 'diagram':
+            # Update status message to indicate diagram generation
+            diagram_processing_msg = "⏳ Создание диаграммы..."
+            if chat_lang == 'en':
+                diagram_processing_msg = "⏳ Creating diagram..."
+            elif chat_lang == 'kk':
+                diagram_processing_msg = "⏳ Диаграмма жасау..."
+                
+            await query.edit_message_text(diagram_processing_msg)
+            
+            # Generate diagram data from transcript
+            if transcript_text:
+                diagram_data = await generate_diagram_data(transcript_text, chat_lang, original_user.full_name)
+                
+                if diagram_data:
+                    # Create PNG from diagram data
+                    png_bytes = render_mermaid_to_png(
+                        create_mermaid_syntax(diagram_data, chat_lang),
+                        diagram_data,
+                        chat_lang
+                    )
+                    
+                    if png_bytes:
+                        # Create bio with PNG bytes for sending as photo
+                        bio = io.BytesIO(png_bytes)
+                        bio.name = 'diagram.png'
+                        
+                        # Create caption with attribution
+                        moscow_tz = pytz.timezone('Europe/Moscow')
+                        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+                        caption = f"{original_user.full_name} | {moscow_time}"
+                        
+                        # Send the diagram as a new photo message
+                        new_message = await context.bot.send_photo(
+                            chat_id=chat_id,
+                            photo=bio,
+                            caption=caption,
+                            reply_markup=create_action_buttons(original_msg_id, chat_lang),
+                            reply_to_message_id=original_msg_id
+                        )
+                        
+                        # Save diagram data as JSON string
+                        try:
+                            diagram_json = json.dumps(diagram_data, ensure_ascii=False)
+                        except Exception as json_e:
+                            logger.error(f"Error serializing diagram data: {json_e}")
+                            diagram_json = None
+                        
+                        # Delete the old summary message
+                        await query.message.delete()
+                        
+                        # Update the database with the new mode and text
+                        await update_summary_mode_and_text(
+                            pool=pool,
+                            record_id=record_id,
+                            new_mode=current_mode,
+                            new_summary_text=diagram_json,
+                            new_transcript_text=transcript_text
+                        )
+                        
+                        # Update the message ID and diagram data 
+                        await update_summary_diagram_and_message_id(
+                            pool=pool,
+                            record_id=record_id,
+                            new_message_id=new_message.message_id,
+                            diagram_data=diagram_json
+                        )
+                        
+                        logger.info(f"Successfully redid diagram for message {original_msg_id}")
+                        return
+            
+            # If we reach here, diagram generation failed - fall back to transcript
+            logger.warning(f"Diagram generation failed for redo, falling back to transcript mode")
+            display_text = transcript_text
+        elif current_mode == 'as_is' or current_mode == 'transcript':
             display_text = transcript_text
         else:
             display_text = summary_text
@@ -790,11 +937,12 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
         "bullet": "🔍",
         "combined": "📊",
         "as_is": "📄",
-        "pasha": "💊"
+        "pasha": "💊",
+        "diagram": "📈" # Using graph emoji for diagram mode
     }
     
     # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -877,11 +1025,12 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
         "bullet": "🔍",
         "combined": "📊",
         "as_is": "📄",
-        "pasha": "💊"
+        "pasha": "💊",
+        "diagram": "📈" # Using graph emoji for diagram mode
     }
     
     # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha"]
+    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -1273,6 +1422,83 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
             await status_message.edit_text(get_dual_string('error')) # Update status message
             return
 
+        # Special handling for diagram mode
+        if mode == 'diagram':
+            # Update status message to indicate diagram generation
+            diagram_processing_msg = "⏳ Создание диаграммы..."
+            if chat_lang == 'en':
+                diagram_processing_msg = "⏳ Creating diagram..."
+            elif chat_lang == 'kk':
+                diagram_processing_msg = "⏳ Диаграмма жасау..."
+                
+            await status_message.edit_text(diagram_processing_msg)
+            
+            # Generate diagram data from transcript
+            diagram_data = await generate_diagram_data(transcript_text, chat_lang, user.full_name)
+            
+            if diagram_data:
+                # Create PNG from diagram data
+                png_bytes = render_mermaid_to_png(
+                    create_mermaid_syntax(diagram_data, chat_lang),
+                    diagram_data,
+                    chat_lang
+                )
+                
+                if png_bytes:
+                    # Create bio with PNG bytes for sending as photo
+                    bio = io.BytesIO(png_bytes)
+                    bio.name = 'diagram.png'
+                    
+                    # Create caption with attribution
+                    moscow_tz = pytz.timezone('Europe/Moscow')
+                    moscow_time = message.date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+                    caption = f"{user.full_name} | {moscow_time}"
+                    
+                    # Send the diagram as photo with reply markup
+                    sent_message = await message.reply_photo(
+                        photo=bio,
+                        caption=caption,
+                        reply_markup=create_action_buttons(message.message_id, chat_lang),
+                        reply_to_message_id=message.message_id
+                    )
+                    
+                    # Delete the processing status message
+                    await status_message.delete()
+                    
+                    # Save diagram data as JSON string
+                    try:
+                        diagram_json = json.dumps(diagram_data, ensure_ascii=False)
+                    except:
+                        diagram_json = None
+                    
+                    # Save summary details to DB
+                    record_id = await save_summary(
+                        pool=pool,
+                        user_id=user.id,
+                        chat_id=message.chat_id,
+                        original_message_id=message.message_id,
+                        summary_message_id=sent_message.message_id,
+                        audio_file_id=voice.file_id, # Store Telegram's file ID
+                        mode=mode,
+                        summary_text=diagram_json, # Store diagram JSON
+                        transcript_text=transcript_text # Store the raw transcript
+                    )
+                    
+                    if record_id is None:
+                        logger.error(f"Failed to save diagram to DB for message {message.message_id}")
+                    
+                    return
+                else:
+                    logger.error("Failed to render diagram to PNG")
+            else:
+                logger.error("Failed to generate diagram data")
+            
+            # If we reach here, diagram generation failed
+            # Fall back to transcript mode
+            mode = 'as_is'
+            display_text = transcript_text
+            
+        # For non-diagram modes or if diagram generation failed, continue with regular processing
         # Determine primary text to display based on the mode
         if mode == 'as_is' or mode == 'transcript':
             display_text = transcript_text
@@ -1289,39 +1515,12 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         header = f"*{user_name}* \\| {moscow_time_str}"
         
         # 5. Properly escape content for MarkdownV2 while preserving Gemini's formatting
-        escaped_display_text = escape_markdown_preserve_formatting(display_text)
+        escaped_display_text = escape_markdown(display_text, version=2)
         final_text = f"{header}\n\n{escaped_display_text}"
-
-        # 6. Create Inline Keyboard Buttons with localized labels
-        # Localize button labels
-        mode_label = "👤 Режим"
-        redo_label = "🔁 Заново" 
-        settings_label = "⚙️ Настройки" # Use the gear icon and correct label
-        done_label = "❎ Готово"
         
-        if chat_lang == 'en':
-            mode_label = "👤 Mode"
-            redo_label = "🔁 Redo"
-            settings_label = "⚙️ Settings" # Use the gear icon and correct label
-            done_label = "❎ Done"
-        elif chat_lang == 'kk':
-            mode_label = "👤 Режим"
-            redo_label = "🔁 Қайта"
-            settings_label = "⚙️ Параметрлер" # Use the gear icon and correct label
-            done_label = "❎ Дайын"
+        # 6. Create reply markup with mode selection buttons
+        reply_markup = create_action_buttons(message.message_id, chat_lang)
         
-        keyboard = [
-            [
-                InlineKeyboardButton(mode_label, callback_data=f"mode_select:{message.message_id}"),
-                InlineKeyboardButton(redo_label, callback_data=f"redo:{message.message_id}"),
-            ],
-            [
-                InlineKeyboardButton(settings_label, callback_data=f"settings:{message.message_id}"), # Include original_msg_id
-                InlineKeyboardButton(done_label, callback_data=f"confirm:{message.message_id}"),
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
         # 7. Send response message (edit the status message)
         sent_message = await status_message.edit_text(
             final_text,

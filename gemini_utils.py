@@ -4,6 +4,12 @@ import time  # Added for retries
 import random  # Added for jitter in retries
 import asyncio  # Added for async sleep
 import re  # Added for regular expressions
+import subprocess
+import tempfile
+import os
+import json
+from datetime import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +43,13 @@ SUPPORTED_MODES = {
     },
     "pasha": {
         "en": "Unhinged 18+",
-        "ru": "Паша Техник 18+",
-        "kk": "Паша Техник 18+"
+        "ru": "Жестко 18+",
+        "kk": "Жестко 18+"
+    },
+    "diagram": {
+        "en": "Diagram",
+        "ru": "Схема",
+        "kk": "Диаграмма"
     }
 }
 
@@ -789,16 +800,25 @@ async def process_audio_with_gemini(audio_file_path: str, mode: str, language: s
                         "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
                         "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['ru']), # Corrected: Get prompt based on language, default to Russian
                     }
-                    summary_prompt = prompt_map.get(mode)
-                    if not summary_prompt:
-                         logger.error(f"Internal error: No prompt found for mode {mode}")
-                         return None, None
+                    
+                    # Special handling for diagram mode - it doesn't use prompt templates
+                    # because diagrams are processed by diagram_utils.py functions
+                    if mode == "diagram":
+                        # For diagram mode we only need the transcript text
+                        summary_text = None
+                        transcript_text = original_transcript
+                        logger.info(f"Transcript extracted for diagram mode in {language}.")
+                    else:
+                        summary_prompt = prompt_map.get(mode)
+                        if not summary_prompt:
+                             logger.error(f"Internal error: No prompt found for mode {mode}")
+                             return None, None
 
-                    logger.debug(f"Requesting {mode} summary in {language}...")
-                    summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
-                    summary_text = summary_response.text
-                    transcript_text = original_transcript
-                    logger.info(f"{mode.capitalize()} summary generated in {language}.")
+                        logger.debug(f"Requesting {mode} summary in {language}...")
+                        summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
+                        summary_text = summary_response.text
+                        transcript_text = original_transcript
+                        logger.info(f"{mode.capitalize()} summary generated in {language}.")
 
                 # --- Cleanup ---
                 # Delete the uploaded file from Gemini (important for managing storage/costs)
