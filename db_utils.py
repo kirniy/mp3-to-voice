@@ -157,17 +157,32 @@ async def update_summary_mode_and_text(
     record_id: int, 
     new_mode: str, 
     new_summary_text: str | None, 
-    new_transcript_text: str | None
+    new_transcript_text: str | None,
+    new_summary_message_id: int | None = None
 ):
-    """Updates the mode and text of a summary record."""
+    """Updates the mode, text, and optionally the summary message ID of a summary record."""
     async with pool.acquire() as connection:
         try:
-            await connection.execute("""
+            # Base query and parameters
+            query = """
                 UPDATE summaries
                 SET mode = $1, summary_text = $2, transcript_text = $3
-                WHERE id = $4;
-            """, new_mode, new_summary_text, new_transcript_text, record_id)
-            logger.info(f"Updated summary record {record_id} to mode '{new_mode}'")
+            """
+            params = [new_mode, new_summary_text, new_transcript_text]
+            param_index = 4 # Start index for additional parameters
+            
+            # Conditionally add message ID update
+            if new_summary_message_id is not None:
+                query += f", summary_telegram_message_id = ${param_index}" 
+                params.append(new_summary_message_id)
+                param_index += 1
+                
+            # Add WHERE clause
+            query += f" WHERE id = ${param_index};" 
+            params.append(record_id)
+            
+            await connection.execute(query, *params)
+            logger.info(f"Updated summary record {record_id} to mode '{new_mode}'" + (f" and message ID {new_summary_message_id}" if new_summary_message_id else ""))
             return True
         except Exception as e:
             logger.error(f"Error updating summary record {record_id}: {e}", exc_info=True)

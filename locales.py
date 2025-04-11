@@ -16,7 +16,7 @@ STRINGS = {
         'pause_success': "🇬🇧 *Bot Paused*\n\nThe bot has been paused for this chat. It will no longer process voice messages or commands until resumed.\n\nUse /resume to enable it again when needed.",
         'resume_success': "🇬🇧 *Bot Resumed*\n\nThe bot has been resumed for this chat. It will now process voice messages and commands normally.",
         'settings_help': "❓ Help",
-        'history_delete': "��️ Delete History",
+        'history_delete': "🗑️ Delete History",
         'history_delete_confirm': "Are you sure you want to delete all voice message history for this chat? This action is irreversible.",
         'history_delete_yes': "✅ Yes, Delete",
         'history_delete_cancel': "❌ Cancel",
@@ -26,7 +26,10 @@ STRINGS = {
         'history_exporting': "⏳ Generating history export...",
         'history_export_complete': "✅ History export complete. Check the file below.",
         'history_export_empty': "ℹ️ No history found to export.",
-        'history_export_error': "❌ Error generating history export."
+        'history_export_error': "❌ Error generating history export.",
+        'diagram_error_data': "❌ Error generating diagram data from transcript.",
+        'diagram_error_syntax': "❌ Error creating diagram syntax.",
+        'diagram_error_render': "❌ Error rendering diagram image."
     },
     'ru': {
         'choose_language': "Пожалуйста, выберите ваш язык:",
@@ -55,7 +58,10 @@ STRINGS = {
         'history_exporting': "⏳ Генерирую экспорт истории...",
         'history_export_complete': "✅ Экспорт истории завершен. Проверьте файл ниже.",
         'history_export_empty': "ℹ️ История для экспорта не найдена.",
-        'history_export_error': "❌ Ошибка при генерации экспорта истории."
+        'history_export_error': "❌ Ошибка при генерации экспорта истории.",
+        'diagram_error_data': "❌ Ошибка генерации данных для диаграммы из транскрипции.",
+        'diagram_error_syntax': "❌ Ошибка создания синтаксиса диаграммы.",
+        'diagram_error_render': "❌ Ошибка рендеринга изображения диаграммы."
     },
     'kk': {
         'choose_language': "Тілді таңдаңыз:",
@@ -84,7 +90,10 @@ STRINGS = {
         'history_exporting': "⏳ Тарих экспорты жасалуда...",
         'history_export_complete': "✅ Тарих экспорты аяқталды. Төмендегі файлды тексеріңіз.",
         'history_export_empty': "ℹ️ Экспорттауға тарих табылмады.",
-        'history_export_error': "❌ Тарих экспортын жасау кезінде қате."
+        'history_export_error': "❌ Тарих экспортын жасау кезінде қате.",
+        'diagram_error_data': "❌ Транскрипциядан диаграмма деректерін жасау қатесі.",
+        'diagram_error_syntax': "❌ Диаграмма синтаксисін жасау қатесі.",
+        'diagram_error_render': "❌ Диаграмма кескінін көрсету қатесі."
     }
 }
 

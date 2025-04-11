@@ -1,8 +1,20 @@
 # Use an official Python runtime as a parent image
 FROM python:3.10-slim
 
-# Install ffmpeg
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install build essentials, ffmpeg, Node.js, and npm
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    ffmpeg \
+    nodejs \
+    npm \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Mermaid CLI globally using npm
+# Also consider installing puppeteer dependencies if needed, but mmdc might handle it
+# RUN apt-get update && apt-get install -y wget gnupg ca-certificates procps libxss1 && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @mermaid-js/mermaid-cli
 
 # Set the working directory in the container
 WORKDIR /app
