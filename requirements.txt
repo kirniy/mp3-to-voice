@@ -4,4 +4,5 @@ python-dotenv
 google-generativeai
 asyncpg
 pytz
-ffmpeg-python # Optional, but recommended for broader format support 
+ffmpeg-python # Optional, but recommended for broader format support
+Pillow # For fallback image generation 

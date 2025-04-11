@@ -105,6 +105,16 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                 """)
             except Exception as e:
                 logger.warning(f"Error adding is_paused column (likely already exists): {e}")
+                
+            # Add summary_diagram column if it doesn't exist
+            try:
+                await connection.execute("""
+                    ALTER TABLE summaries 
+                    ADD COLUMN IF NOT EXISTS summary_diagram TEXT;
+                """)
+                logger.info("Added summary_diagram column to summaries table or verified it exists")
+            except Exception as e:
+                logger.warning(f"Error adding summary_diagram column (likely already exists): {e}")
 
             logger.info("Database tables created or verified")
             

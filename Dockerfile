@@ -24,7 +24,9 @@ RUN apt-get update && \
     libglib2.0-0 \
     libgtk-3-0 \
     libnspr4 \
+    # Explicitly install libnss3 and related packages
     libnss3 \
+    libnss3-tools \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libstdc++6 \
@@ -47,6 +49,7 @@ RUN apt-get update && \
     # Debug utilities to verify installations
     procps \
     file \
+    libc-bin \
     # Make sure these critical packages are explicitly installed
     chromium \
     chromium-common \
@@ -58,7 +61,8 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install Mermaid CLI globally (required by diagram_utils.py)
-RUN npm install -g @mermaid-js/mermaid-cli
+RUN npm install -g @mermaid-js/mermaid-cli && \
+    mmdc --version
 
 # Verify Chrome and dependencies are accessible
 RUN which chromium || which chromium-browser || echo "Chromium not found in PATH!" && \
@@ -66,12 +70,23 @@ RUN which chromium || which chromium-browser || echo "Chromium not found in PATH
     ldd /usr/bin/chromium | grep nss || echo "NSS libraries not found in Chromium dependencies" && \
     ls -la /usr/lib/*/libnss* || echo "NSS libraries not found in expected location"
 
-# Verify Mermaid CLI installation
-RUN which mmdc || echo "Mermaid CLI not found in PATH!" && \
-    mmdc --version || echo "Failed to get Mermaid CLI version"
-
 # Set the working directory in the container
 WORKDIR /app
+
+# Create puppeteer config file with correct settings directly in the app directory
+RUN echo '{ \
+  "executablePath": "/usr/bin/chromium", \
+  "args": [ \
+    "--no-sandbox", \
+    "--disable-setuid-sandbox", \
+    "--disable-dev-shm-usage", \
+    "--disable-accelerated-2d-canvas", \
+    "--no-first-run", \
+    "--no-zygote", \
+    "--single-process", \
+    "--disable-gpu" \
+  ] \
+}' > /app/puppeteerConfigFile.json
 
 # Copy the requirements file into the container at /app
 COPY requirements.txt .
