@@ -75,7 +75,7 @@ async def generate_diagram_data(transcript: str, language: str, author_name: str
     3. CAREFULLY CONSIDER WHICH DIAGRAM TYPE WOULD BEST REPRESENT THIS CONTENT:
        - Choose the diagram type that will most effectively visualize the content in a portrait orientation seen from mobile devices
        - Your options to consider (but the decision is yours):
-         * mindmap: Great for ideas, concepts, features, or related topics
+         * mindmap: Great for ideas, concepts, features, or related topics (try to use this the most)
          * flowchart TD: Useful for processes, decisions, or hierarchical structures
          * sequenceDiagram: Good for interactions, step-by-step processes, or timelines
          * classDiagram: Helpful for showing relationships between components
@@ -87,6 +87,9 @@ async def generate_diagram_data(transcript: str, language: str, author_name: str
         - Start with "mindmap TD" on its own line
         - The FIRST node after "mindmap TD" will be the root (no indentation)
         - Child nodes must be indented with spaces
+        - Use standard node syntax: `NodeID[Node Text]` for nodes. DO NOT use `[(...)]` or other non-standard bracket combinations.
+        - Each node definition (e.g., `NodeID[Text]`) must be on its own dedicated line.
+        - Never user parentheses for node text.
         - Example correct structure:
           ```
           mindmap TD
