@@ -189,21 +189,21 @@ def escape_markdown_preserve_formatting(text):
 def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineKeyboardMarkup:
     """Creates the action buttons for voice message responses."""
     # Localize button labels
-    mode_label = "👤 Режим"
-    redo_label = "🔁 Заново" 
+    mode_label = "Режим"
+    redo_label = "Заново" 
     settings_label = "⚙️ Настройки" # Use the gear icon
-    done_label = "❎ Готово"
+    done_label = "Готово"
     
     if language == 'en':
-        mode_label = "👤 Mode"
-        redo_label = "🔁 Redo"
+        mode_label = "Mode"
+        redo_label = "Redo"
         settings_label = "⚙️ Settings" # Use the gear icon
-        done_label = "❎ Done"
+        done_label = "Done"
     elif language == 'kk':
-        mode_label = "👤 Режим"
-        redo_label = "🔁 Қайта"
+        mode_label = "Режим"
+        redo_label = "Қайта"
         settings_label = "⚙️ Параметрлер" # Use the gear icon
-        done_label = "❎ Дайын"
+        done_label = "Дайын"
         
     return InlineKeyboardMarkup([
         [
@@ -221,24 +221,24 @@ def create_action_buttons(original_msg_id: int, language: str = 'ru') -> InlineK
 def create_voice_settings_buttons(original_msg_id: int, language: str = 'ru') -> InlineKeyboardMarkup:
     """Creates the settings buttons for voice message responses."""
     # Localize button labels
-    language_label = "🌐 Язык"
-    history_label = "📚 История"
+    language_label = "Язык"
+    history_label = "История"
     mode_label = "⚙️ Режим"
-    subscription_label = "💰 Подписка"
-    back_label = "⬅️ Назад"
+    subscription_label = "Подписка"
+    back_label = "← Назад"
     
     if language == 'en':
-        language_label = "🌐 Language"
-        history_label = "📚 History"
+        language_label = "Language"
+        history_label = "History"
         mode_label = "⚙️ Mode"
-        subscription_label = "💰 Subscription"
-        back_label = "⬅️ Back"
+        subscription_label = "Subscription"
+        back_label = "← Back"
     elif language == 'kk':
-        language_label = "🌐 Тіл"
-        history_label = "📚 Тарих"
+        language_label = "Тіл"
+        history_label = "Тарих"
         mode_label = "⚙️ Режим"
-        subscription_label = "💰 Жазылым"
-        back_label = "⬅️ Артқа"
+        subscription_label = "Жазылым"
+        back_label = "← Артқа"
         
     return InlineKeyboardMarkup([
         [
@@ -319,7 +319,7 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     # Previous page button (if not the first item)
     if current_index > 0:
         prev_offset = current_index - 1
-        prev_label = "⬅️"
+        prev_label = "←"
         nav_row.append(InlineKeyboardButton(prev_label, callback_data=f"history_nav:{original_msg_id}:{prev_offset}"))
     else:
         nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
@@ -336,7 +336,7 @@ def create_history_pagination_buttons(original_msg_id: int, current_offset: int,
     # Next page button (if not the last item)
     if total_count > 0 and current_index < total_count - 1:
         next_offset = current_index + 1
-        next_label = "➡️"
+        next_label = "→"
         nav_row.append(InlineKeyboardButton(next_label, callback_data=f"history_nav:{original_msg_id}:{next_offset}"))
     else:
         nav_row.append(InlineKeyboardButton(" ", callback_data="noop")) # Placeholder
@@ -373,15 +373,15 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
     # Create mode selection keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
+    # Mode names without emojis
     mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
+        "brief": "",
+        "detailed": "",
+        "bullet": "",
+        "combined": "",
+        "as_is": "",
+        "pasha": "",
+        "diagram": "" 
     }
     
     # Define the order of modes
@@ -395,15 +395,15 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
         logger.error(f"Error getting default mode: {e}")
     
     # Localized button texts
-    pin_label = "📌 "
-    cancel_label = "❌ Отмена"
+    pin_label = "Pin"
+    cancel_label = "← Отмена"
     
     if chat_lang == 'en':
-        pin_label = "📌 Pin"
-        cancel_label = "❌ Cancel"
+        pin_label = "Pin"
+        cancel_label = "← Cancel"
     elif chat_lang == 'kk':
-        pin_label = "📌 Бекіту"
-        cancel_label = "❌ Болдырмау"
+        pin_label = "Бекіту"
+        cancel_label = "← Болдырмау"
     
     # Add each mode selection button
     for mode_key in mode_order:
@@ -481,7 +481,7 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
     
     # Show processing indicator with localized mode name
     mode_name = get_mode_name(new_mode, chat_lang)
-    status_text = f"⏳ {mode_name}..."
+    status_text = f"{mode_name}..."
     try:
         if query.message.photo:
             # Edit caption if it's a photo message (diagram)
@@ -507,7 +507,7 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         # Answer callback to prevent hanging
         await query.answer("Processing...")
 
-    # await query.edit_message_text(f"⏳ {mode_name}...", reply_markup=None)
+    # await query.edit_message_text(f"{mode_name}...", reply_markup=None)
 
     try:
         # Get the record from the database
@@ -516,8 +516,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         if not db_record:
             logger.error(f"Record not found for message {original_msg_id}")
             await query.edit_message_text(
-                "🇬🇧 Error: Could not find the record.\n\n"
-                "🇷🇺 Ошибка: Не удалось найти запись.",
+                "Error: Could not find the record.\n\n"
+                "Ошибка: Не удалось найти запись.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
             return
@@ -543,8 +543,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         if transcript_text is None:
             logger.error(f"Failed to get transcript for mode change, aborting")
             await query.edit_message_text(
-                "🇬🇧 Error processing audio. Please try again.\n\n"
-                "🇷🇺 Ошибка при обработке аудио. Пожалуйста, попробуйте снова.",
+                "Error processing audio. Please try again.\n\n"
+                "Ошибка при обработке аудио. Пожалуйста, попробуйте снова.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
             return
@@ -552,11 +552,11 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         # Special handling for diagram mode
         if new_mode == 'diagram':
             # Update status message to indicate diagram generation
-            diagram_processing_msg = "⏳ Создание диаграммы..."
+            diagram_processing_msg = "Создание диаграммы..."
             if chat_lang == 'en':
-                diagram_processing_msg = "⏳ Creating diagram..."
+                diagram_processing_msg = "Creating diagram..."
             elif chat_lang == 'kk':
-                diagram_processing_msg = "⏳ Диаграмма жасау..."
+                diagram_processing_msg = "Диаграмма жасау..."
                 
             # FIX: Check if the original message is a photo before editing
             try:
@@ -663,8 +663,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
             if not summary_text:
                 logger.error(f"Failed to generate summary for mode {new_mode}")
                 await query.edit_message_text(
-                    "🇬🇧 Error generating summary. Please try again.\n\n"
-                    "🇷🇺 Ошибка при создании сводки. Пожалуйста, попробуйте снова.",
+                    "Error generating summary. Please try again.\n\n"
+                    "Ошибка при создании сводки. Пожалуйста, попробуйте снова.",
                     reply_markup=create_action_buttons(original_msg_id, chat_lang)
                 )
                 return
@@ -734,8 +734,8 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         try:
             # Show error message
             await query.edit_message_text(
-                "🇬🇧 Error processing mode change. Please try again.\n\n"
-                "🇷🇺 Ошибка при смене режима. Пожалуйста, попробуйте снова.",
+                "Error processing mode change. Please try again.\n\n"
+                "Ошибка при смене режима. Пожалуйста, попробуйте снова.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
         except Exception as edit_e:
@@ -779,7 +779,7 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         logger.error(f"Unexpected error setting redo processing status for message {query.message.message_id}: {e}", exc_info=True)
         await query.answer("Processing...")
 
-    # await query.edit_message_text("⏳ Переделываю сводку...", reply_markup=None)
+    # await query.edit_message_text("Переделываю сводку...", reply_markup=None)
 
     try:
         # Get the record from the database
@@ -788,8 +788,8 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         if not db_record:
             logger.error(f"Record not found for message {original_msg_id}")
             await query.edit_message_text(
-                "🇬🇧 Error: Could not find the record.\n\n"
-                "🇷🇺 Ошибка: Не удалось найти запись.",
+                "Error: Could not find the record.\n\n"
+                "Ошибка: Не удалось найти запись.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
             return
@@ -819,11 +819,11 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         # Special handling for diagram mode
         if current_mode == 'diagram':
             # Update status message to indicate diagram generation
-            diagram_processing_msg = "⏳ Создание диаграммы..."
+            diagram_processing_msg = "Создание диаграммы..."
             if chat_lang == 'en':
-                diagram_processing_msg = "⏳ Creating diagram..."
+                diagram_processing_msg = "Creating diagram..."
             elif chat_lang == 'kk':
-                diagram_processing_msg = "⏳ Диаграмма жасау..."
+                diagram_processing_msg = "Диаграмма жасау..."
                 
             # FIX: Check if the original message is a photo before editing
             try:
@@ -915,8 +915,8 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         if not display_text:
             logger.error(f"Failed to generate content for mode {current_mode}")
             await query.edit_message_text(
-                "🇬🇧 Error generating content. Please try again.\n\n"
-                "🇷🇺 Ошибка при создании контента. Пожалуйста, попробуйте снова.",
+                "Error generating content. Please try again.\n\n"
+                "Ошибка при создании контента. Пожалуйста, попробуйте снова.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
             return
@@ -989,8 +989,8 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
         logger.error(f"Error in redo: {e}", exc_info=True)
         try:
             await query.edit_message_text(
-                "🇬🇧 An error occurred. Please try again.\n\n"
-                "🇷🇺 Произошла ошибка. Пожалуйста, попробуйте снова.",
+                "An error occurred. Please try again.\n\n"
+                "Произошла ошибка. Пожалуйста, попробуйте снова.",
                 reply_markup=create_action_buttons(original_msg_id, chat_lang)
             )
         except Exception as edit_e:
@@ -1087,15 +1087,15 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
     # Create pin menu keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
+    # Mode names without emojis
     mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
+        "brief": "",
+        "detailed": "",
+        "bullet": "",
+        "combined": "",
+        "as_is": "",
+        "pasha": "",
+        "diagram": "" 
     }
     
     # Define the order of modes
@@ -1109,12 +1109,12 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
         logger.error(f"Error getting default mode: {e}")
     
     # Localized button texts
-    back_label = "⬅️ Назад"
+    back_label = "← Назад"
     
     if chat_lang == 'en':
-        back_label = "⬅️ Back"
+        back_label = "← Back"
     elif chat_lang == 'kk':
-        back_label = "⬅️ Артқа"
+        back_label = "← Артқа"
     
     # Add each mode with selection indicator
     for mode_key in mode_order:
@@ -1182,15 +1182,15 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     # Create mode selection keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
+    # Mode names without emojis
     mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
+        "brief": "",
+        "detailed": "",
+        "bullet": "",
+        "combined": "",
+        "as_is": "",
+        "pasha": "",
+        "diagram": "" 
     }
     
     # Define the order of modes
@@ -1224,7 +1224,7 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     
     # Add back button
     keyboard.append([
-        InlineKeyboardButton("⬅️ Back", callback_data="settings")
+        InlineKeyboardButton("← Back", callback_data="settings")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1247,6 +1247,36 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
         elif chat_lang == 'kk':
             error_message = "Режим опцияларын көрсету кезінде қате"
         await query.answer(error_message, show_alert=True)
+
+# --- Text Command Handler ---
+
+async def handle_text_commands(update: Update, context: CallbackContext) -> None:
+    """Handle text-based commands without slash."""
+    if not update.message or not update.message.text:
+        return
+    
+    text = update.message.text.lower().strip()
+    
+    # Map text commands to handler functions
+    command_map = {
+        'start': start,
+        'старт': start,
+        'settings': settings_command,
+        'настройки': settings_command,
+        'help': help_command,
+        'помощь': help_command,
+        'pause': pause_command,
+        'пауза': pause_command,
+        'стоп': pause_command,
+        'stop': pause_command,
+        'resume': resume_command,
+        'продолжить': resume_command,
+    }
+    
+    # Check if text matches any command
+    handler = command_map.get(text)
+    if handler:
+        await handler(update, context)
 
 # --- Command Handlers ---
 
@@ -1282,7 +1312,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     
     # Add settings button
     keyboard.append([
-        InlineKeyboardButton("⚙️ Settings/Настройки", callback_data="settings")
+        InlineKeyboardButton("⚙️", callback_data="settings")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1310,24 +1340,27 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
     chat_lang = await get_chat_language(pool, chat_id)
     
     # Localize menu options
-    lang_btn_text = "🌐 Change Language"
-    history_btn_text = "📚 History"
-    sub_btn_text = "💰 Subscription Info"
-    mode_btn_text = "⚙️ Default Mode"
-    close_btn_text = "❌ Close"
+    lang_btn_text = "выбор языка"
+    mode_btn_text = "выбор режима"
+    history_btn_text = "история"
+    sub_btn_text = "информация о подписке"
+    help_btn_text = "помощь"
+    back_btn_text = "← назад"
     
-    if chat_lang == 'ru':
-        lang_btn_text = "🌐 Изменить язык"
-        history_btn_text = "📚 История"
-        sub_btn_text = "💰 Информация о подписке"
-        mode_btn_text = "⚙️ Режимы"
-        close_btn_text = "❌ Закрыть"
+    if chat_lang == 'en':
+        lang_btn_text = "language selection"
+        mode_btn_text = "mode selection"
+        history_btn_text = "history"
+        sub_btn_text = "subscription info"
+        help_btn_text = "help"
+        back_btn_text = "← back"
     elif chat_lang == 'kk':
-        lang_btn_text = "🌐 Тілді өзгерту"
-        history_btn_text = "📚 Тарих"
-        sub_btn_text = "💰 Жазылым туралы ақпарат"
-        mode_btn_text = "⚙️ Режим"
-        close_btn_text = "❌ Жабу"
+        lang_btn_text = "тіл таңдау"
+        mode_btn_text = "режим таңдау"
+        history_btn_text = "тарих"
+        sub_btn_text = "жазылым туралы ақпарат"
+        help_btn_text = "көмек"
+        back_btn_text = "← артқа"
     
     # Create keyboard
     keyboard = [
@@ -1335,7 +1368,8 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
         [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
         [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
-        [InlineKeyboardButton(close_btn_text, callback_data="close_settings")]
+        [InlineKeyboardButton(help_btn_text, callback_data="help")],
+        [InlineKeyboardButton(back_btn_text, callback_data="close_settings")]
     ]
     
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1547,7 +1581,7 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
 
     # Acknowledge receipt with chat's preferred language
     status_message = await message.reply_text(
-        "⏳ " + get_string('processing', chat_lang).split('\n')[0].replace('🇬🇧 ', '').replace('🇷🇺 ', '').replace('🇰🇿 ', ''), 
+        get_string('processing', chat_lang).split('\n')[0], 
         reply_to_message_id=message.message_id
     )
 
@@ -1572,11 +1606,11 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
     # Special handling for diagram mode
     if mode == 'diagram':
         # Update status message to indicate diagram generation
-        diagram_processing_msg = "⏳ Создание диаграммы..."
+        diagram_processing_msg = "Создание диаграммы..."
         if chat_lang == 'en':
-            diagram_processing_msg = "⏳ Creating diagram..."
+            diagram_processing_msg = "Creating diagram..."
         elif chat_lang == 'kk':
-            diagram_processing_msg = "⏳ Диаграмма жасау..."
+            diagram_processing_msg = "Диаграмма жасау..."
             
         await status_message.edit_text(diagram_processing_msg)
         
@@ -1755,7 +1789,7 @@ async def button_callback(update: Update, context: CallbackContext):
                 
                 # Create a simple back button if no history
                 no_history_keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Назад к настройкам" if chat_lang == 'ru' else "⬅️ Back to Settings", callback_data="settings")]
+                    [InlineKeyboardButton("← Назад к настройкам" if chat_lang == 'ru' else "← Back to Settings", callback_data="settings")]
                 ])
                 await query.edit_message_text(
                     no_history_message,
@@ -1906,45 +1940,44 @@ async def button_callback(update: Update, context: CallbackContext):
                 original_msg_id = None
         
         # Localize menu options
-        lang_btn_text = "🌐 Change Language"
-        history_btn_text = "📚 History"
-        sub_btn_text = "💰 Subscription Info"
-        mode_btn_text = "⚙️ Default Mode"
-        help_btn_text = get_string('settings_help', chat_lang) # New Help button
-        close_btn_text = "❌ Close"
-        back_to_msg_text = "⬅️ Back to Message"
+        lang_btn_text = "выбор языка"
+        mode_btn_text = "выбор режима"
+        history_btn_text = "история"
+        sub_btn_text = "информация о подписке"
+        help_btn_text = "помощь"
+        back_btn_text = "← назад"
+        back_to_msg_text = "← назад к сообщению"
         
-        if chat_lang == 'ru':
-            lang_btn_text = "🌐 Изменить язык"
-            history_btn_text = "📚 История"
-            sub_btn_text = "💰 Информация о подписке"
-            mode_btn_text = "⚙️ Выбор режима"
-            # help_btn_text is already localized via get_string
-            close_btn_text = "❌ Закрыть"
-            back_to_msg_text = "⬅️ Назад к сообщению"
+        if chat_lang == 'en':
+            lang_btn_text = "language selection"
+            mode_btn_text = "mode selection"
+            history_btn_text = "history"
+            sub_btn_text = "subscription info"
+            help_btn_text = "help"
+            back_btn_text = "← back"
+            back_to_msg_text = "← back to message"
         elif chat_lang == 'kk':
-            lang_btn_text = "🌐 Тілді өзгерту"
-            history_btn_text = "📚 Тарих"
-            sub_btn_text = "💰 Жазылым туралы ақпарат"
-            mode_btn_text = "⚙️ Әдепкі режим"
-            # help_btn_text is already localized via get_string
-            close_btn_text = "❌ Жабу"
-            back_to_msg_text = "⬅️ Хабарламаға оралу"
+            lang_btn_text = "тіл таңдау"
+            mode_btn_text = "режим таңдау"
+            history_btn_text = "тарих"
+            sub_btn_text = "жазылым туралы ақпарат"
+            help_btn_text = "көмек"
+            back_btn_text = "← артқа"
+            back_to_msg_text = "← хабарламаға оралу"
         
         keyboard = [
             [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
             [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
             [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
             [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
-            [InlineKeyboardButton(help_btn_text, callback_data="help")], # Added Help button
+            [InlineKeyboardButton(help_btn_text, callback_data="help")],
         ]
         
-        # Add "Back to Message" button if opened from a message
+        # Add appropriate back button
         if original_msg_id is not None:
             keyboard.append([InlineKeyboardButton(back_to_msg_text, callback_data=f"back_to_message:{original_msg_id}")])
-        
-        # Add close button
-        keyboard.append([InlineKeyboardButton(close_btn_text, callback_data="close_settings")])
+        else:
+            keyboard.append([InlineKeyboardButton(back_btn_text, callback_data="close_settings")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
@@ -2001,7 +2034,7 @@ async def button_callback(update: Update, context: CallbackContext):
             
         original_msg_id = int(data_parts[1])
         # Create back button to voice settings
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")]]
+        keyboard = [[InlineKeyboardButton("← Back", callback_data=f"voice_settings:{original_msg_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         # Send subscription info
@@ -2072,7 +2105,7 @@ async def button_callback(update: Update, context: CallbackContext):
         
         # Add back button
         keyboard.append([
-            InlineKeyboardButton("⬅️ Back", callback_data=f"voice_settings:{original_msg_id}")
+            InlineKeyboardButton("← Back", callback_data=f"voice_settings:{original_msg_id}")
         ])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2112,7 +2145,7 @@ async def button_callback(update: Update, context: CallbackContext):
         
         # Add back button
         keyboard.append([
-            InlineKeyboardButton("⬅️ Back", callback_data="settings")
+            InlineKeyboardButton("← Back", callback_data="settings")
         ])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -2139,7 +2172,7 @@ async def button_callback(update: Update, context: CallbackContext):
     
     elif action == "subscription_info":
         # Create back button
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="settings")]]
+        keyboard = [[InlineKeyboardButton("← Back", callback_data="settings")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         try:
@@ -2170,7 +2203,7 @@ async def button_callback(update: Update, context: CallbackContext):
             
             # Then try to update the text if possible
             try:
-                await query.edit_message_text(get_string('settings', chat_lang) + " ✅")
+                await query.edit_message_text(get_string('settings', chat_lang))
             except telegram_error.BadRequest as text_error:
                 # If editing text fails, just log it - we already removed the keyboard
                 logger.debug(f"Could not update message text when closing settings (likely not a text message): {text_error}")
@@ -2562,6 +2595,9 @@ def main() -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("pause", pause_command))
     application.add_handler(CommandHandler("resume", resume_command))
+
+    # Handler for text-based commands (without slash)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_commands))
 
     # Handler for MP3/WAV conversion (Document or Audio)
     application.add_handler(MessageHandler(filters.AUDIO | filters.Document.AUDIO, handle_audio))
