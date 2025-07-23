@@ -20,7 +20,7 @@ from telegram import error as telegram_error # Added to fix NameError with teleg
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
 from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, update_summary_diagram_and_message_id, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history # Added update_summary_diagram_and_message_id
-from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
+from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name, format_output_with_header # Added get_mode_name
 from diagram_utils import generate_diagram_data, create_mermaid_syntax, render_mermaid_to_png
 
 # Enable logging
@@ -373,19 +373,8 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
     # Create mode selection keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
-    mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
-    }
-    
-    # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
+    # Define the order of modes (оригинал, тезисно, кратко, подробно, комбо, жестко 18+, схема)
+    mode_order = ["as_is", "bullet", "brief", "detailed", "combined", "pasha", "diagram"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -408,7 +397,6 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
     # Add each mode selection button
     for mode_key in mode_order:
         if mode_key in SUPPORTED_MODES:
-            emoji = mode_emojis.get(mode_key, "")
             # Get localized mode name
             mode_name = get_mode_name(mode_key, chat_lang)
             
@@ -419,7 +407,7 @@ async def show_mode_selection(update: Update, context: CallbackContext, original
             # Mode selection button
             keyboard.append([
                 InlineKeyboardButton(
-                    f"{emoji} {mode_name}", 
+                    mode_name, 
                     callback_data=f"mode_set:{original_msg_id}:{mode_key}"
                 )
             ])
@@ -647,13 +635,6 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         
         # For non-diagram modes or if diagram generation failed, continue with regular processing
         # Prepare final message text
-        # Format header with emoji
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-        moscow_time_str = escape_markdown(moscow_time, version=2)
-        user_name = escape_markdown(original_user.full_name, version=2)
-        header = f"*{user_name}* \\| {moscow_time_str}"
-        
         # Determine what text to display based on the mode
         if new_mode == 'as_is':
             display_text = transcript_text
@@ -670,9 +651,17 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
                 return
             display_text = summary_text
         
+        # Use the new formatter to apply the required format
+        final_text = format_output_with_header(
+            summary_text=display_text,
+            mode=new_mode,
+            username=original_user.full_name,
+            timestamp=original_message_date,
+            language=chat_lang
+        )
+        
         # Escape for MarkdownV2
-        escaped_display_text = escape_markdown(display_text, version=2)
-        final_text = f"{header}\n\n{escaped_display_text}"
+        final_text = escape_markdown(final_text, version=2)
         
         # Update message with new summary and buttons
         # Conditionally edit text or caption, handle caption length
@@ -921,16 +910,17 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
             )
             return
         
-        # Format message with normal formatting (not code block)
-        moscow_tz = pytz.timezone('Europe/Moscow')
-        moscow_time = original_message_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-        moscow_time_str = escape_markdown(moscow_time, version=2)
-        user_name = escape_markdown(original_user.full_name, version=2)
-        header = f"*{user_name}* \\| {moscow_time_str}"
+        # Format message with new formatter
+        final_text = format_output_with_header(
+            summary_text=display_text,
+            mode=current_mode,
+            username=original_user.full_name,
+            timestamp=original_message_date,
+            language=chat_lang
+        )
         
         # Now format the display text with proper markdown
-        escaped_display_text = escape_markdown_preserve_formatting(display_text)
-        final_text = f"{header}\n\n{escaped_display_text}"
+        final_text = escape_markdown_preserve_formatting(final_text)
         
         # Update message with new summary and buttons
         # Conditionally edit text or caption, handle caption length
@@ -1087,19 +1077,8 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
     # Create pin menu keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
-    mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
-    }
-    
-    # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
+    # Define the order of modes (оригинал, тезисно, кратко, подробно, комбо, жестко 18+, схема)
+    mode_order = ["as_is", "bullet", "brief", "detailed", "combined", "pasha", "diagram"]
     
     # Get current default mode
     current_default_mode = DEFAULT_MODE
@@ -1119,7 +1098,6 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
     # Add each mode with selection indicator
     for mode_key in mode_order:
         if mode_key in SUPPORTED_MODES:
-            emoji = mode_emojis.get(mode_key, "")
             # Get localized mode name
             mode_name = get_mode_name(mode_key, chat_lang)
             
@@ -1129,7 +1107,7 @@ async def show_pin_menu(update: Update, context: CallbackContext, original_msg_i
                 
             keyboard.append([
                 InlineKeyboardButton(
-                    f"{emoji} {mode_name}", 
+                    mode_name, 
                     callback_data=f"set_default_mode:{original_msg_id}:{mode_key}"
                 )
             ])
@@ -1182,19 +1160,8 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
     # Create mode selection keyboard
     keyboard = []
     
-    # Add appropriate emojis for each mode
-    mode_emojis = {
-        "brief": "📝",
-        "detailed": "📋",
-        "bullet": "🔍",
-        "combined": "📊",
-        "as_is": "📄",
-        "pasha": "💊",
-        "diagram": "📈" # Using graph emoji for diagram mode
-    }
-    
-    # Define the order of modes
-    mode_order = ["as_is", "brief", "detailed", "bullet", "combined", "pasha", "diagram"]
+    # Define the order of modes (оригинал, тезисно, кратко, подробно, комбо, жестко 18+, схема)
+    mode_order = ["as_is", "bullet", "brief", "detailed", "combined", "pasha", "diagram"]
     
     # Localized title
     title = "Select default mode:"
@@ -1652,18 +1619,19 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
     else:
         display_text = summary_text if summary_text is not None else transcript_text
     
-    # 4. Format response header with emoji
-    moscow_tz = pytz.timezone('Europe/Moscow')
-    moscow_time = message.date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-    # Escape the entire timestamp for MarkdownV2 (especially the '.' characters)
-    moscow_time_str = escape_markdown(moscow_time, version=2)
-    # Escape username for MarkdownV2
-    user_name = escape_markdown(message.from_user.full_name, version=2)
-    header = f"*{user_name}* \\| {moscow_time_str}"
+    # 4. Format response with new header format
+    # Use the new formatter to apply the required format
+    final_text = format_output_with_header(
+        summary_text=display_text,
+        mode=mode,
+        username=message.from_user.full_name,
+        timestamp=message.date,
+        language=chat_lang
+    )
     
-    # 5. Properly escape content for MarkdownV2 while preserving Gemini's formatting
-    escaped_display_text = escape_markdown(display_text, version=2)
-    final_text = f"{header}\n\n{escaped_display_text}"
+    # 5. Escape for MarkdownV2 if needed
+    # Note: The formatter returns plain text, so we need to escape it
+    final_text = escape_markdown(final_text, version=2)
     
     # 6. Create reply markup with mode selection buttons
     reply_markup = create_action_buttons(message.message_id, chat_lang)
@@ -2460,16 +2428,17 @@ async def button_callback(update: Update, context: CallbackContext):
                 original_user = await context.bot.get_chat(user_id)
                 original_date = query.message.date  # Use current date as fallback
                 
-                # Format message header
-                moscow_tz = pytz.timezone('Europe/Moscow')
-                moscow_time = original_date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
-                moscow_time_str = escape_markdown(moscow_time, version=2)
-                user_name = escape_markdown(original_user.full_name, version=2)
-                header = f"*{user_name}* \\| {moscow_time_str}"
+                # Format message with new formatter
+                final_text = format_output_with_header(
+                    summary_text=display_text,
+                    mode=current_mode,
+                    username=original_user.full_name,
+                    timestamp=original_date,
+                    language=chat_lang
+                )
                 
                 # Format the display text with markdown
-                escaped_display_text = escape_markdown_preserve_formatting(display_text)
-                final_text = f"{header}\n\n{escaped_display_text}"
+                final_text = escape_markdown_preserve_formatting(final_text)
                 
                 # First, try to update only the reply markup - works for all message types
                 await query.edit_message_reply_markup(
