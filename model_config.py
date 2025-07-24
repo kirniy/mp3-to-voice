@@ -20,7 +20,7 @@ MODELS = {
         "supports_audio": True,
         "supports_thinking": True,
         "description": "Latest Flash model with thinking capabilities",
-        "model_name": "models/gemini-2.5-flash-preview-04-17",
+        "model_name": "models/gemini-2.5-flash",
         "thinking_budget_default": 1024,
         "thinking_budget_options": {
             "off": 0,
