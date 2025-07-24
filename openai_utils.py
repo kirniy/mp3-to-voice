@@ -35,9 +35,11 @@ async def gpt4o_transcribe_openai(path: str, lang: str = "auto") -> str | None:
         log.info(f"Attempting OpenAI transcription with file: {filename}")
             
         with open(path, "rb") as audio_file:
+            # OpenAI SDK expects a file object, not a tuple
+            audio_file.name = filename  # Set name attribute for the file object
             response = await client.audio.transcriptions.create(
                 model="gpt-4o-transcribe",  # GPT-4o transcribe model
-                file=(filename, audio_file, "audio/ogg"),
+                file=audio_file,
                 language=None if lang == "auto" else lang,
                 response_format="text"  # fastest: just text, no JSON
             )
