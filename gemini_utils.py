@@ -1746,21 +1746,10 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
     # Check if using GPT-4o Transcribe
     model_config = get_model_config(model_id)
     if model_config and model_config.get("provider") == "replicate":
-        logger.info(f"Using Replicate model {model_id} for transcription")
-        
-        from replicate_utils import transcribe_audio_with_gpt4o, get_language_code_for_replicate
-        
-        # Convert language code for Replicate
-        replicate_lang = get_language_code_for_replicate(language)
-        
-        # Use GPT-4o Transcribe
-        transcript = transcribe_audio_with_gpt4o(
-            audio_file_path=audio_file_path,
-            language=replicate_lang,
-            temperature=0.0
-        )
-        
-        return transcript
+        logger.warning(f"Replicate model {model_id} requires URL upload - falling back to Gemini")
+        # For now, fall back to Gemini until we implement proper file upload for Replicate
+        model_id = DEFAULT_TRANSCRIPTION_MODEL
+        model_config = get_model_config(model_id)
     
     # Otherwise, use Gemini models
     retry_count = 0

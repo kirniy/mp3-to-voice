@@ -1735,20 +1735,28 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         thinking_budget_level = await get_user_model_preference(pool, user.id, "thinking_budget_level")
         
         # 4. Pass chat language and model preferences to Gemini for processing
-        summary_text, transcript_text = await process_audio_with_gemini(
-            temp_audio_file.name, 
-            mode, 
-            chat_lang,
-            protocol=protocol,
-            direct_model=direct_model,
-            transcription_model=transcription_model,
-            processing_model=processing_model,
-            thinking_budget_level=thinking_budget_level
-        )
+        try:
+            logger.info(f"Processing with protocol={protocol}, direct_model={direct_model}, "
+                       f"transcription_model={transcription_model}, processing_model={processing_model}")
+            
+            summary_text, transcript_text = await process_audio_with_gemini(
+                temp_audio_file.name, 
+                mode, 
+                chat_lang,
+                protocol=protocol,
+                direct_model=direct_model,
+                transcription_model=transcription_model,
+                processing_model=processing_model,
+                thinking_budget_level=thinking_budget_level
+            )
+        except Exception as e:
+            logger.error(f"Exception in process_audio_with_gemini: {str(e)}", exc_info=True)
+            summary_text = None
+            transcript_text = None
 
     # 3. Handle Gemini Response
     if transcript_text is None: # Indicates a processing error in Gemini
-        logger.error(f"Gemini processing failed for message {message.message_id}")
+        logger.error(f"Processing failed for message {message.message_id}")
         await status_message.edit_text(get_dual_string('error')) # Update status message
         return
 

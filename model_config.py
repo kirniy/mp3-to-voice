@@ -75,7 +75,8 @@ DEFAULT_DIRECT_MODEL = "gemini-2.0-flash"         # For direct protocol
 # Model selection constraints
 MODEL_CONSTRAINTS = {
     # Which models can be used for transcription (audio input required)
-    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash", "gpt-4o-transcribe"],
+    # Note: gpt-4o-transcribe temporarily disabled - requires URL upload implementation
+    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash"],
     
     # Which models can be used for text processing (mode formatting)
     "text_processing": ["gemini-2.0-flash", "gemini-2.5-flash"],
