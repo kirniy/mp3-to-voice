@@ -1,9 +1,10 @@
 python-telegram-bot[job-queue]>=20.0
 pydub
 python-dotenv
-google-generativeai
+google-generativeai>=0.5.3
 asyncpg
 pytz
 ffmpeg-python # Optional, but recommended for broader format support
 Pillow # For fallback image generation
-replicate # For GPT-4o Transcribe integration 
+openai>=1.25.0 # For GPT-4o Transcribe integration
+aiofiles # For async file operations with OpenAI 

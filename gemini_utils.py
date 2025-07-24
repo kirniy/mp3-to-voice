@@ -168,7 +168,7 @@ async def process_audio_with_gemini_direct(audio_file_path: str, mode: str, lang
                     logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget} (level: {thinking_budget_level})")
                     
                     generation_config = {
-                        "thinkingBudget": thinking_budget
+                        "temperature": 0.0
                     }
                     model = genai.GenerativeModel(
                         model_name=model_config["model_name"],
@@ -1725,7 +1725,7 @@ Start immediately with the first word of the recording.
             logger.info(f"Using {model_config['name']} for transcript cleaning with thinking budget: {thinking_budget}")
             
             generation_config = {
-                "thinkingBudget": thinking_budget
+                "temperature": 0.0
             }
             model = genai.GenerativeModel(
                 model_name=model_config["model_name"],
@@ -1758,7 +1758,7 @@ Start immediately with the first word of the recording.
         logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget}")
         
         generation_config = {
-            "thinkingBudget": thinking_budget
+            "temperature": 0.0
         }
         model = genai.GenerativeModel(
             model_name=model_config["model_name"],
@@ -1834,12 +1834,14 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
         The raw transcript text or None on error.
     """
     # Check if using GPT-4o Transcribe
-    model_config = get_model_config(model_id)
-    if model_config and model_config.get("provider") == "replicate":
-        logger.warning(f"Replicate model {model_id} requires URL upload - falling back to Gemini")
-        # For now, fall back to Gemini until we implement proper file upload for Replicate
+    if model_id == "gpt-4o-transcribe":
+        from openai_utils import gpt4o_transcribe
+        text = await gpt4o_transcribe(audio_file_path, language)
+        if text:
+            return text
+        # falls through to Gemini if None
+        logger.warning("GPT-4o transcription failed, falling back to Gemini")
         model_id = DEFAULT_TRANSCRIPTION_MODEL
-        model_config = get_model_config(model_id)
     
     # Otherwise, use Gemini models
     retry_count = 0
@@ -1881,7 +1883,7 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
                 if model_config.get("supports_thinking"):
                     thinking_budget = get_thinking_budget(model_id, thinking_budget_level)
                     generation_config = {
-                        "thinkingBudget": thinking_budget
+                        "temperature": 0.0
                     }
                     model = genai.GenerativeModel(
                         model_name=model_config["model_name"],
