@@ -1,339 +1,10 @@
-import logging
-import google.generativeai as genai
-import time  # Added for retries
-import random  # Added for jitter in retries
-import asyncio  # Added for async sleep
-import re  # Added for regular expressions
-import subprocess
-import tempfile
-import os
-import json
-from datetime import datetime
-import pytz
-from model_config import (
-    GEMINI_MODELS, PROTOCOLS, DEFAULT_PROTOCOL, 
-    DEFAULT_DIRECT_MODEL, DEFAULT_TRANSCRIPTION_MODEL, DEFAULT_PROCESSING_MODEL,
-    get_model_config, get_thinking_budget, is_model_suitable_for_task
-)
-from mode_prompts import MODE_PROMPTS
-
-logger = logging.getLogger(__name__)
-
-# Helper function to get mode prompts
-def get_mode_prompts():
-    """Returns the mode prompts dictionary"""
-    return MODE_PROMPTS
-
-# Define supported modes
-SUPPORTED_MODES = {
-    # Internal mode key: Display name in different languages
-    "brief": {
-        "en": "Brief",
-        "ru": "Кратко",
-        "kk": "Қысқаша"
-    },
-    "detailed": {
-        "en": "Detailed",
-        "ru": "Подробно",
-        "kk": "Толық"
-    },
-    "bullet": {
-        "en": "Bullet Points",
-        "ru": "Тезисно",
-        "kk": "Тезистер"
-    },
-    "combined": {
-        "en": "Combined",
-        "ru": "Комбо",
-        "kk": "Біріктірілген"
-    },
-    "as_is": {
-        "en": "As is",
-        "ru": "Как есть",
-        "kk": "Бар күйінде"
-    },
-    "pasha": {
-        "en": "Unhinged 18+",
-        "ru": "Жестко 18+",
-        "kk": "Жестко 18+"
-    },
-    "diagram": {
-        "en": "Diagram",
-        "ru": "Схема",
-        "kk": "Диаграмма"
-    }
-}
-
-# Internal modes - not shown in the UI but used in processing
-INTERNAL_MODES = {
-    "transcript": "transcript"  # Used internally for transcript processing
-}
-
-DEFAULT_MODE = "bullet"
-
-# Max retries for transient errors
-MAX_RETRIES = 3
-
-# Helper function to get the localized mode name
-def get_mode_name(mode: str, language: str = 'ru') -> str:
-    """Get the localized name for a mode.
-    
-    Args:
-        mode: The mode key
-        language: Language code ('en', 'ru', 'kk')
-        
-    Returns:
-        The localized display name of the mode
-    """
-    if mode in SUPPORTED_MODES:
-        # Default to Russian if language not supported
-        if language not in ['en', 'ru', 'kk']:
-            language = 'ru'
-        
-        return SUPPORTED_MODES[mode][language]
-    elif mode in INTERNAL_MODES:
-        return INTERNAL_MODES[mode]
-    else:
-        return mode
-
-async def process_audio_with_gemini_direct(audio_file_path: str, mode: str, language: str = 'ru', model_id: str = DEFAULT_DIRECT_MODEL, thinking_budget_level: str = 'medium') -> tuple[str | None, str | None]:
-    """Processes audio using Gemini direct protocol: audio → model → output.
-
-    Args:
-        audio_file_path: Path to the audio file.
-        mode: The desired processing mode (e.g., 'brief', 'detailed').
-        language: The language for the summary output ('en', 'ru', 'kk').
-        model_id: The Gemini model to use.
-        thinking_budget_level: Thinking budget level for models that support it.
-
-    Returns:
-        A tuple containing (summary_text, transcript_text). 
-        summary_text will be None if only transcript is requested.
-        transcript_text will be None if processing fails.
-        Returns (None, None) on error.
-    """
-    logger.info(f"Processing audio file {audio_file_path} with mode '{mode}' in language '{language}'")
-    
-    if mode not in SUPPORTED_MODES and mode not in INTERNAL_MODES:
-        logger.error(f"Unsupported mode requested: {mode}")
-        return None, None
-
-    # Retry counter and uploaded file reference for cleanup
-    retry_count = 0
-    audio_file = None
-    
-    try:
-        while retry_count <= MAX_RETRIES:
-            try:
-                # --- Upload and Process File ---
-                # Only upload on first try or if previous attempt failed before upload completed
-                if audio_file is None:
-                    logger.debug("Uploading audio file to Gemini...")
-                    audio_file = genai.upload_file(
-                        path=audio_file_path, 
-                        mime_type="audio/ogg"  # Specify MIME type for Telegram voice messages
-                    )
-                    logger.info(f"Audio file uploaded successfully: {audio_file.name} ({audio_file.uri})")
-                
-                # --- Ensure file is processed before proceeding --- 
-                while audio_file.state.name == "PROCESSING":
-                    logger.debug("File still processing...")
-                    # Add small delay to avoid busy-waiting
-                    await asyncio.sleep(1)
-                    audio_file = genai.get_file(audio_file.name)
-
-                if audio_file.state.name == "FAILED":
-                    logger.error(f"Gemini file processing failed for {audio_file.name}")
-                    # Cleanup and prepare for retry
-                    try:
-                        genai.delete_file(audio_file.name)
-                        audio_file = None
-                    except Exception:
-                        pass  # Ignore deletion errors
-                    
-                    # Raise to trigger retry
-                    raise ValueError("File processing failed on Gemini server")
-                
-                logger.debug("Audio file ready for use.")
-
-                # --- Select Model ---
-                model_config = get_model_config(model_id)
-                if not model_config:
-                    logger.error(f"Invalid model ID: {model_id}")
-                    raise ValueError(f"Model {model_id} not found in configuration")
-                
-                # Configure model with thinking budget if supported
-                if model_config.get("supports_thinking"):
-                    thinking_budget = get_thinking_budget(model_id, thinking_budget_level)
-                    logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget} (level: {thinking_budget_level})")
-                    
-                    generation_config = {
-                        "thinkingBudget": thinking_budget
-                    }
-                    model = genai.GenerativeModel(
-                        model_name=model_config["model_name"],
-                        generation_config=generation_config
-                    )
-                else:
-                    logger.info(f"Using {model_config['name']} (no thinking support)")
-                    model = genai.GenerativeModel(model_name=model_config["model_name"])
-
-                # Use the model to generate the raw transcript from the audio file
-                logger.debug("Requesting raw transcript from audio file...")
-                # Create content from the uploaded file with a clear transcription instruction
-                content = [
-                    "Transcribe the following audio exactly as spoken. Do not analyze or comment on the content, just provide the raw transcript:",
-                    {"file_data": {"file_uri": audio_file.uri, "mime_type": "audio/ogg"}}
-                ]
-                raw_transcript_response = await model.generate_content_async(content)
-                raw_transcript = raw_transcript_response.text
-                logger.debug("Raw transcript obtained from audio file")
-
-                # --- Define Language-specific instructions ---
-                # Maps for localizing the output based on user language preference
-                language_instructions = {
-                    'en': "Provide the summary in English, regardless of the original audio language.",
-                    'ru': "Provide the summary in Russian (русский), regardless of the original audio language.",
-                    'kk': "Provide the summary in Kazakh (қазақша), regardless of the original audio language."
-                }
-                
-                # Default to Russian if language not supported
-                lang_instruction = language_instructions.get(language, language_instructions['ru'])
-                
-                # Define language-specific prompts for transcript mode
-                transcript_prompts = {
-                    'en': """
-<instruction>
-You are a professional transcriber. Your task is to create the most accurate transcription of the audio.
-
-<critical_requirements>
-- Transcribe VERBATIM - every word, pause, interjection
-- If a word is unclear, write the best variant with alternative in brackets: Michael [Mikhail?]
-- Preserve ALL: names, company names, technical terms, slang, jargon
-- DO NOT correct speaker's grammatical errors
-- DO NOT translate foreign words
-- DO NOT rephrase or improve speech
-</critical_requirements>
-
-<handling_unclear_audio>
-- Unclear word: [inaudible]
-- Multiple speakers talking: [crosstalk]
-- Phrase interruption: use ellipsis...
-- Pauses longer than 3 seconds: [pause]
-- Background noise interferes: [noise, possibly: "text"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Add only basic punctuation for readability
-- Preserve intonation through marks: ?, !, ...
-- New speaker = new paragraph
-- Keep interjections and filler words as is: "uh", "um", "like", "you know"
-</punctuation_rules>
-
-<output_format>
-ONLY transcript text. No headers, comments, explanations.
-Start immediately with the first word of the recording.
-</output_format>
-
-<forbidden>
-- DO NOT add "Transcript:", "Speaker said:" and similar
-- DO NOT comment on recording quality
-- DO NOT correct speech errors
-- DO NOT add your thoughts or explanations
-</forbidden>
-</instruction>
-""",
-                    
-                    'ru': """
-<instruction>
-Ты профессиональный транскрибатор. Твоя задача - создать максимально точную транскрипцию аудио.
-
-<critical_requirements>
-- Транскрибируй ДОСЛОВНО - каждое слово, паузу, междометие
-- Если слово неразборчиво, напиши лучший вариант и в скобках альтернативу: [имя] [[имя]?]
-- Сохрани ВСЕ: имена, названия компаний, технические термины, сленг, жаргон
-- НЕ исправляй грамматические ошибки говорящего
-- НЕ переводи иностранные слова
-- НЕ перефразируй и не улучшай речь
-</critical_requirements>
-
-<handling_unclear_audio>
-- Неразборчивое слово: [неразборчиво]
-- Несколько говорят одновременно: [перекрестные разговоры]
-- Обрыв фразы: используй многоточие...
-- Паузы длиннее 3 секунд: [пауза]
-- Фоновый шум мешает: [шум, возможно: "текст"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Расставь только базовую пунктуацию для читабельности
-- Сохрани интонацию через знаки: ?, !, ...
-- Новый говорящий = новый абзац
-- Междометия и слова-паразиты оставь как есть: "ну", "э-э", "типа", "короче"
-</punctuation_rules>
-
-<output_format>
-ТОЛЬКО текст транскрипции. Никаких заголовков, комментариев, пояснений.
-Начинай сразу с первого слова записи.
-</output_format>
-
-<forbidden>
-- НЕ добавляй "Транскрипция:", "Говорящий сказал:" и подобное
-- НЕ комментируй качество записи
-- НЕ исправляй речевые ошибки
-- НЕ добавляй свои мысли или пояснения
-</forbidden>
-</instruction>
-""",
-                    'kk': """
-<instruction>
-Сіз кәсіби транскрибатор. Сіздің міндетіңіз - аудионың ең дәл транскрипциясын жасау.
-
-<critical_requirements>
-- СӨЗ СӨЗІНЕ транскрибалаңыз - әр сөз, пауза, одағай
-- Егер сөз анық болмаса, ең жақсы нұсқаны және жақшада баламаны жазыңыз: [есім] [[есім]?]
-- БАРЛЫҒЫН сақтаңыз: есімдер, компания атаулары, техникалық терминдер, сленг, жаргон
-- Сөйлеушінің грамматикалық қателерін ТҮЗЕТПЕҢІЗ
-- Шет тілдердегі сөздерді АУДАРМАҢЫЗ
-- Сөйлемді қайта құрмаңыз және жақсартпаңыз
-</critical_requirements>
-
-<handling_unclear_audio>
-- Анық емес сөз: [анық емес]
-- Бірнеше адам бір уақытта сөйлейді: [қиылысқан әңгімелер]
-- Сөйлемнің үзілуі: көп нүкте қолданыңыз...
-- 3 секундтан ұзақ паузалар: [пауза]
-- Фондық шу кедергі келтіреді: [шу, мүмкін: "мәтін"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Оқуға ыңғайлы болу үшін тек негізгі тыныс белгілерін қойыңыз
-- Интонацияны белгілер арқылы сақтаңыз: ?, !, ...
-- Жаңа сөйлеуші = жаңа абзац
-- Одағайлар мен паразит сөздерді сол күйінде қалдырыңыз: "ну", "э-э", "типа", "короче"
-</punctuation_rules>
-
-<output_format>
-ТЕК транскрипция мәтіні. Ешқандай тақырыптар, түсініктемелер, түсіндірмелер жоқ.
-Жазбаның бірінші сөзінен бірден бастаңыз.
-</output_format>
-
-<forbidden>
-- "Транскрипция:", "Сөйлеуші айтты:" және ұқсас сөздерді ҚОСПАҢЫЗ
-- Жазба сапасына түсініктеме БЕРМЕҢІЗ
-- Сөйлеу қателерін ТҮЗЕТПЕҢІЗ
-- Өз ойларыңызды немесе түсіндірмелерді ҚОСПАҢЫЗ
-</forbidden>
-</instruction>
 """
-                }
-                
-                # Get mode prompts from imported module
-                mode_prompts = get_mode_prompts()
-                # Skip old definition
-                if False: {
-                    'brief': {
-                        'en': """
+Mode prompts for Voicio Bot - shared between direct and transcript protocols
+"""
+
+MODE_PROMPTS = {
+    'brief': {
+        'en': """
 <instruction>
 You create brief summaries from Telegram voice messages. People read them in a hurry - make the text maximally useful and easy to understand quickly.
 
@@ -407,7 +78,7 @@ Before sending, check:
 </quality_check>
 </instruction>
 """,
-                        'ru': """
+        'ru': """
 <instruction>
 Ты создаешь краткие выжимки из голосовых сообщений Telegram. Люди читают их на бегу - сделай текст максимально полезным и быстро понятным.
 
@@ -505,7 +176,7 @@ Before sending, check:
 </quality_check>
 </instruction>
 """,
-                        'kk': """
+        'kk': """
 <instruction>
 Сіз Telegram дауыстық хабарламаларынан қысқаша түйіндемелер жасайсыз. Адамдар оларды асығыс оқиды - мәтінді барынша пайдалы және тез түсінікті етіңіз.
 
@@ -569,10 +240,10 @@ Before sending, check:
 </quality_check>
 </instruction>
 """
-                    },
-                    
-                    'detailed': {
-                        'en': """
+    },
+    
+    'detailed': {
+        'en': """
 <instruction>
 You create detailed summaries preserving all important information from the audio. The reader should get a complete picture without listening to the original.
 
@@ -636,7 +307,7 @@ The reader should be able to:
 </quality_check>
 </instruction>
 """,
-                        'ru': """
+        'ru': """
 <instruction>
 Ты создаешь подробные выжимки, сохраняя всю важную информацию из аудио. Читатель должен получить полную картину, не слушая оригинал.
 
@@ -700,7 +371,7 @@ The reader should be able to:
 </quality_check>
 </instruction>
 """,
-                        'kk': """
+        'kk': """
 <instruction>
 Сіз аудиодан барлық маңызды ақпаратты сақтай отырып, егжей-тегжейлі түйіндемелер жасайсыз. Оқырман түпнұсқаны тыңдамай толық көріністі алуы керек.
 
@@ -764,10 +435,10 @@ Telegram дауыстық хабарламалары жиі хаотикалық
 </quality_check>
 </instruction>
 """
-                    },
-                    
-                    'bullet': {
-                        'en': """
+    },
+    
+    'bullet': {
+        'en': """
 <instruction>
 You extract key theses from audio of group Telegram chats. These are often messy - people interrupt each other, discuss multiple topics, use slang, and there's background noise.
 
@@ -847,8 +518,8 @@ Before sending, check:
 </quality_check>
 </instruction>
 """,
-                        
-                        'ru': """
+        
+        'ru': """
 <instruction>
 Ты извлекаешь ключевые тезисы из аудио групповых чатов Telegram. Там часто бардак - люди перебивают друг друга, обсуждают несколько тем сразу, используют сленг, на фоне шум.
 
@@ -961,8 +632,8 @@ Before sending, check:
 </quality_check>
 </instruction>
 """,
-                        
-                        'kk': """
+        
+        'kk': """
 <instruction>
 Сіз әңгімелерден тек мәнін бөліп алатын талдаушысыз. Telegram топтық чаттарынан жазбалармен жұмыс істейсіз - олар бір-бірін бөліп, сленг және шумен толы хаосты болуы мүмкін.
 
@@ -1028,10 +699,10 @@ Before sending, check:
 </quality_check>
 </instruction>
 """
-                    },
-                    
-                    'combined': {
-                        'en': """
+    },
+    
+    'combined': {
+        'en': """
 <instruction>
 You create two-level analysis: first quick theses for skimming, then details for those who need more. Like a trailer + full movie.
 
@@ -1092,7 +763,7 @@ Good summary:
 </quality_metrics>
 </instruction>
 """,
-                        'ru': """
+        'ru': """
 <instruction>
 Ты создаешь двухуровневый анализ: сначала быстрые тезисы для беглого просмотра, потом детали для тех, кому нужно больше. Как трейлер + полный фильм.
 
@@ -1153,7 +824,7 @@ Good summary:
 </quality_metrics>
 </instruction>
 """,
-                        'kk': """
+        'kk': """
 <instruction>
 Сіз екі деңгейлі талдау жасайсыз: алдымен жылдам қарау үшін тезистер, содан кейін көбірек қажет болғандар үшін егжей-тегжейлер. Трейлер + толық фильм сияқты.
 
@@ -1214,10 +885,10 @@ Good summary:
 </quality_metrics>
 </instruction>
 """
-                    },
-                    
-                    'pasha': {
-                        'en': """
+    },
+    
+    'pasha': {
+        'en': """
 <instruction>
 You're creating a brutally honest summary of a Telegram voice message. Maximum clarity, zero fluff, sharp language where appropriate.
 
@@ -1277,7 +948,7 @@ Is this how you'd tell the story at a bar?
 </quality_check>
 </instruction>
 """,
-                        'ru': """
+        'ru': """
 <instruction>
 Ты создаешь предельно честную выжимку из голосового сообщения Telegram. Максимальная ясность, ноль воды, жесткий язык где надо.
 
@@ -1371,7 +1042,7 @@ Is this how you'd tell the story at a bar?
 </quality_check>
 </instruction>
 """,
-                        'kk': """
+        'kk': """
 <instruction>
 Сіз Telegram дауыстық хабарламасынан өте шынайы түйіндеме жасайсыз. Максималды анықтық, нөл су, қажет жерде қатты тіл.
 
@@ -1441,547 +1112,5 @@ Is this how you'd tell the story at a bar?
 </quality_check>
 </instruction>
 """
-                    }
-                }
-                
-                # Process based on mode
-                # Clean up the raw transcript for readability
-                original_transcript = raw_transcript
-                
-                # Always use the transcript for processing (for now we're using the raw transcript)
-                # In the future, we might add a cleaning step here
-                
-                if mode == 'transcript':
-                    # Return cleaned transcript using mode-specific prompts
-                    prompt = transcript_prompts.get(language, transcript_prompts['ru'])
-                    
-                    logger.debug(f"Requesting cleaned transcript in {language}...")
-                    transcript_response = await model.generate_content_async([prompt, raw_transcript])
-                    transcript_text = transcript_response.text
-                    
-                    logger.info(f"Cleaned transcript generated in {language}.")
-                    summary_text = None
-                else:
-                    # For other modes, generate the summary based on the raw transcript
-                    prompt_map = {
-                        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-                        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-                        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-                        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-                        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']), # Get prompt based on language, default to English
-                    }
-                    
-                    # Special handling for diagram mode - it doesn't use prompt templates
-                    # because diagrams are processed by diagram_utils.py functions
-                    if mode == "diagram":
-                        # For diagram mode we only need the transcript text
-                        summary_text = None
-                        transcript_text = original_transcript
-                        logger.info(f"Transcript extracted for diagram mode in {language}.")
-                    else:
-                        summary_prompt = prompt_map.get(mode)
-                        if not summary_prompt:
-                             logger.error(f"Internal error: No prompt found for mode {mode}")
-                             return None, None
-
-                        logger.debug(f"Requesting {mode} summary in {language}...")
-                        summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
-                        summary_text = summary_response.text
-                        transcript_text = original_transcript
-                        logger.info(f"{mode.capitalize()} summary generated in {language}.")
-
-                # --- Cleanup ---
-                # Delete the uploaded file from Gemini (important for managing storage/costs)
-                try:
-                    logger.debug(f"Deleting Gemini file: {audio_file.name}")
-                    genai.delete_file(audio_file.name)
-                    logger.info(f"Successfully deleted Gemini file: {audio_file.name}")
-                except Exception as e:
-                    logger.warning(f"Could not delete Gemini file {audio_file.name}: {e}")
-
-                # Success - return the result
-                return summary_text, transcript_text
-                
-            except Exception as e:
-                retry_count += 1
-                if retry_count > MAX_RETRIES:
-                    logger.error(f"Max retries ({MAX_RETRIES}) exceeded for Gemini API call. Final error: {str(e)}")
-                    raise  # Re-raise to be caught by the outer try-except
-                
-                # Log retry attempt
-                logger.warning(f"Gemini API call failed (attempt {retry_count}/{MAX_RETRIES}): {str(e)}. Retrying...")
-                
-                # Exponential backoff with jitter
-                wait_time = (2 ** retry_count) + random.uniform(0, 1)
-                logger.info(f"Waiting {wait_time:.2f} seconds before retry...")
-                time.sleep(wait_time)
-                
-                # If we had an uploaded file that might be causing issues, try to delete it
-                if audio_file is not None:
-                    try:
-                        genai.delete_file(audio_file.name)
-                        logger.info(f"Deleted potentially problematic file {audio_file.name} before retry")
-                    except Exception:
-                        pass  # Ignore deletion errors
-                    audio_file = None  # Reset for re-upload
-        
-        # Should never reach here due to the raise in the loop
-        return None, None
-
-    except Exception as e:
-        logger.error(f"Error processing audio with Gemini: {e}", exc_info=True)
-        # Attempt to clean up uploaded file if it exists
-        if audio_file is not None:
-             try:
-                 genai.delete_file(audio_file.name)
-                 logger.info(f"Cleaned up Gemini file {audio_file.name} after error.")
-             except Exception as delete_e:
-                 logger.warning(f"Could not delete Gemini file {audio_file.name} during error cleanup: {delete_e}")
-        return None, None 
-
-
-async def process_audio_with_gemini_transcript(
-    audio_file_path: str, 
-    mode: str, 
-    language: str = 'ru',
-    transcription_model_id: str = DEFAULT_TRANSCRIPTION_MODEL,
-    processing_model_id: str = DEFAULT_PROCESSING_MODEL,
-    thinking_budget_level: str = 'medium'
-) -> tuple[str | None, str | None]:
-    """Processes audio using Gemini transcript protocol: audio → transcription → mode processing → output.
-
-    Args:
-        audio_file_path: Path to the audio file.
-        mode: The desired processing mode (e.g., 'brief', 'detailed').
-        language: The language for the summary output ('en', 'ru', 'kk').
-        transcription_model_id: The Gemini model to use for transcription.
-        processing_model_id: The Gemini model to use for mode processing.
-        thinking_budget_level: Thinking budget level for models that support it.
-
-    Returns:
-        A tuple containing (summary_text, transcript_text). 
-        summary_text will be None if only transcript is requested.
-        transcript_text will be None if processing fails.
-        Returns (None, None) on error.
-    """
-    logger.info(f"Processing audio file {audio_file_path} with transcript protocol, mode '{mode}' in language '{language}'")
-    
-    if mode not in SUPPORTED_MODES and mode not in INTERNAL_MODES:
-        logger.error(f"Unsupported mode requested: {mode}")
-        return None, None
-
-    # First, get the transcript using the transcription model
-    logger.info(f"Step 1: Transcribing audio with {transcription_model_id}")
-    
-    # Get transcription using a simplified version focused only on transcription
-    transcript_result = await _transcribe_audio_only(audio_file_path, language, transcription_model_id, thinking_budget_level)
-    
-    if not transcript_result:
-        logger.error("Failed to transcribe audio")
-        return None, None
-    
-    raw_transcript = transcript_result
-    
-    # If mode is transcript, return the clean transcript
-    if mode == 'transcript':
-        # Get the transcript prompt
-        transcript_prompts = {
-            'en': """
-<instruction>
-You are a professional transcriber. Your task is to create the most accurate transcription of the audio.
-
-<critical_requirements>
-- Transcribe VERBATIM - every word, pause, interjection
-- If a word is unclear, write the best variant with alternative in brackets: Michael [Mikhail?]
-- Preserve ALL: names, company names, technical terms, slang, jargon
-- DO NOT correct speaker's grammatical errors
-- DO NOT translate foreign words
-- DO NOT rephrase or improve speech
-</critical_requirements>
-
-<handling_unclear_audio>
-- Unclear word: [inaudible]
-- Multiple speakers talking: [crosstalk]
-- Phrase interruption: use ellipsis...
-- Pauses longer than 3 seconds: [pause]
-- Background noise interferes: [noise, possibly: "text"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Add only basic punctuation for readability
-- Preserve intonation through marks: ?, !, ...
-- New speaker = new paragraph
-- Keep interjections and filler words as is: "uh", "um", "like", "you know"
-</punctuation_rules>
-
-<output_format>
-ONLY transcript text. No headers, comments, explanations.
-Start immediately with the first word of the recording.
-</output_format>
-
-<forbidden>
-- DO NOT add "Transcript:", "Speaker said:" and similar
-- DO NOT comment on recording quality
-- DO NOT correct speech errors
-- DO NOT add your thoughts or explanations
-</forbidden>
-</instruction>
-""",
-            'ru': """
-<instruction>
-Ты профессиональный транскрибатор. Твоя задача - создать максимально точную транскрипцию аудио.
-
-<critical_requirements>
-- Транскрибируй ДОСЛОВНО - каждое слово, паузу, междометие
-- Если слово неразборчиво, напиши лучший вариант и в скобках альтернативу: [имя] [[имя]?]
-- Сохрани ВСЕ: имена, названия компаний, технические термины, сленг, жаргон
-- НЕ исправляй грамматические ошибки говорящего
-- НЕ переводи иностранные слова
-- НЕ перефразируй и не улучшай речь
-</critical_requirements>
-
-<handling_unclear_audio>
-- Неразборчивое слово: [неразборчиво]
-- Несколько говорят одновременно: [перекрестные разговоры]
-- Обрыв фразы: используй многоточие...
-- Паузы длиннее 3 секунд: [пауза]
-- Фоновый шум мешает: [шум, возможно: "текст"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Расставь только базовую пунктуацию для читабельности
-- Сохрани интонацию через знаки: ?, !, ...
-- Новый говорящий = новый абзац
-- Междометия и слова-паразиты оставь как есть: "ну", "э-э", "типа", "короче"
-</punctuation_rules>
-
-<output_format>
-ТОЛЬКО текст транскрипции. Никаких заголовков, комментариев, пояснений.
-Начинай сразу с первого слова записи.
-</output_format>
-
-<forbidden>
-- НЕ добавляй "Транскрипция:", "Говорящий сказал:" и подобное
-- НЕ комментируй качество записи
-- НЕ исправляй речевые ошибки
-- НЕ добавляй свои мысли или пояснения
-</forbidden>
-</instruction>
-""",
-            'kk': """
-<instruction>
-Сіз кәсіби транскрибатор. Сіздің міндетіңіз - аудионың ең дәл транскрипциясын жасау.
-
-<critical_requirements>
-- СӨЗ СӨЗІНЕ транскрибалаңыз - әр сөз, пауза, одағай
-- Егер сөз анық болмаса, ең жақсы нұсқаны және жақшада баламаны жазыңыз: [есім] [[есім]?]
-- БАРЛЫҒЫН сақтаңыз: есімдер, компания атаулары, техникалық терминдер, сленг, жаргон
-- Сөйлеушінің грамматикалық қателерін ТҮЗЕТПЕҢІЗ
-- Шет тілдердегі сөздерді АУДАРМАҢЫЗ
-- Сөйлемді қайта құрмаңыз және жақсартпаңыз
-</critical_requirements>
-
-<handling_unclear_audio>
-- Анық емес сөз: [анық емес]
-- Бірнеше адам бір уақытта сөйлейді: [қиылысқан әңгімелер]
-- Сөйлемнің үзілуі: көп нүкте қолданыңыз...
-- 3 секундтан ұзақ паузалар: [пауза]
-- Фондық шу кедергі келтіреді: [шу, мүмкін: "мәтін"]
-</handling_unclear_audio>
-
-<punctuation_rules>
-- Оқуға ыңғайлы болу үшін тек негізгі тыныс белгілерін қойыңыз
-- Интонацияны белгілер арқылы сақтаңыз: ?, !, ...
-- Жаңа сөйлеуші = жаңа абзац
-- Одағайлар мен паразит сөздерді сол күйінде қалдырыңыз: "ну", "э-э", "типа", "короче"
-</punctuation_rules>
-
-<output_format>
-ТЕК транскрипция мәтіні. Ешқандай тақырыптар, түсініктемелер, түсіндірмелер жоқ.
-Жазбаның бірінші сөзінен бірден бастаңыз.
-</output_format>
-
-<forbidden>
-- "Транскрипция:", "Сөйлеуші айтты:" және ұқсас сөздерді ҚОСПАҢЫЗ
-- Жазба сапасына түсініктеме БЕРМЕҢІЗ
-- Сөйлеу қателерін ТҮЗЕТПЕҢІЗ
-- Өз ойларыңызды немесе түсіндірмелерді ҚОСПАҢЫЗ
-</forbidden>
-</instruction>
-"""
-        }
-        
-        prompt = transcript_prompts.get(language, transcript_prompts['ru'])
-        
-        # Configure processing model
-        model_config = get_model_config(processing_model_id)
-        if not model_config:
-            logger.error(f"Invalid processing model ID: {processing_model_id}")
-            return None, None
-        
-        # Configure model with thinking budget if supported
-        if model_config.get("supports_thinking"):
-            thinking_budget = get_thinking_budget(processing_model_id, thinking_budget_level)
-            logger.info(f"Using {model_config['name']} for transcript cleaning with thinking budget: {thinking_budget}")
-            
-            generation_config = {
-                "thinkingBudget": thinking_budget
-            }
-            model = genai.GenerativeModel(
-                model_name=model_config["model_name"],
-                generation_config=generation_config
-            )
-        else:
-            logger.info(f"Using {model_config['name']} for transcript cleaning (no thinking support)")
-            model = genai.GenerativeModel(model_name=model_config["model_name"])
-        
-        # Process transcript
-        logger.debug(f"Cleaning transcript with {processing_model_id}...")
-        clean_response = await model.generate_content_async([prompt, raw_transcript])
-        transcript_text = clean_response.text
-        
-        logger.info(f"Cleaned transcript generated in {language}.")
-        return None, transcript_text
-    
-    # For other modes, process the transcript according to the mode
-    logger.info(f"Step 2: Processing transcript with {processing_model_id} for mode '{mode}'")
-    
-    # Configure processing model
-    model_config = get_model_config(processing_model_id)
-    if not model_config:
-        logger.error(f"Invalid processing model ID: {processing_model_id}")
-        return None, None
-    
-    # Configure model with thinking budget if supported
-    if model_config.get("supports_thinking"):
-        thinking_budget = get_thinking_budget(processing_model_id, thinking_budget_level)
-        logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget}")
-        
-        generation_config = {
-            "thinkingBudget": thinking_budget
-        }
-        model = genai.GenerativeModel(
-            model_name=model_config["model_name"],
-            generation_config=generation_config
-        )
-    else:
-        logger.info(f"Using {model_config['name']} (no thinking support)")
-        model = genai.GenerativeModel(model_name=model_config["model_name"])
-    
-    # Get mode prompts from imported module
-    mode_prompts = get_mode_prompts()
-    # Skip old placeholder definition
-    if False: {
-        'brief': {
-            'en': """[brief mode prompt]""",
-            'ru': """[brief mode prompt in Russian]""",
-            'kk': """[brief mode prompt in Kazakh]"""
-        },
-        'detailed': {
-            'en': """[detailed mode prompt]""",
-            'ru': """[detailed mode prompt in Russian]""",
-            'kk': """[detailed mode prompt in Kazakh]"""
-        },
-        'bullet': {
-            'en': """[bullet mode prompt]""",
-            'ru': """[bullet mode prompt in Russian]""",
-            'kk': """[bullet mode prompt in Kazakh]"""
-        },
-        'combined': {
-            'en': """[combined mode prompt]""",
-            'ru': """[combined mode prompt in Russian]""",
-            'kk': """[combined mode prompt in Kazakh]"""
-        },
-        'pasha': {
-            'en': """[pasha mode prompt]""",
-            'ru': """[pasha mode prompt in Russian]""",
-            'kk': """[pasha mode prompt in Kazakh]"""
-        }
     }
-    
-    # Special handling for diagram mode
-    if mode == "diagram":
-        # For diagram mode we only need the transcript text
-        return None, raw_transcript
-    
-    # Get the appropriate prompt
-    prompt_map = {
-        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
-    }
-    
-    summary_prompt = prompt_map.get(mode)
-    if not summary_prompt:
-        logger.error(f"Internal error: No prompt found for mode {mode}")
-        return None, None
-    
-    # Process the transcript
-    logger.debug(f"Requesting {mode} summary in {language}...")
-    summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
-    summary_text = summary_response.text
-    
-    logger.info(f"{mode.capitalize()} summary generated in {language} using transcript protocol.")
-    return summary_text, raw_transcript
-
-
-async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: str, thinking_budget_level: str) -> str | None:
-    """Helper function to only transcribe audio without any processing.
-    
-    Returns:
-        The raw transcript text or None on error.
-    """
-    # Check if using GPT-4o Transcribe
-    model_config = get_model_config(model_id)
-    if model_config and model_config.get("provider") == "replicate":
-        logger.warning(f"Replicate model {model_id} requires URL upload - falling back to Gemini")
-        # For now, fall back to Gemini until we implement proper file upload for Replicate
-        model_id = DEFAULT_TRANSCRIPTION_MODEL
-        model_config = get_model_config(model_id)
-    
-    # Otherwise, use Gemini models
-    retry_count = 0
-    audio_file = None
-    
-    try:
-        while retry_count <= MAX_RETRIES:
-            try:
-                # Upload file
-                if audio_file is None:
-                    logger.debug("Uploading audio file to Gemini for transcription...")
-                    audio_file = genai.upload_file(
-                        path=audio_file_path, 
-                        mime_type="audio/ogg"
-                    )
-                    logger.info(f"Audio file uploaded successfully: {audio_file.name}")
-                
-                # Wait for processing
-                while audio_file.state.name == "PROCESSING":
-                    logger.debug("File still processing...")
-                    await asyncio.sleep(1)
-                    audio_file = genai.get_file(audio_file.name)
-                
-                if audio_file.state.name == "FAILED":
-                    logger.error(f"Gemini file processing failed for {audio_file.name}")
-                    try:
-                        genai.delete_file(audio_file.name)
-                        audio_file = None
-                    except Exception:
-                        pass
-                    raise ValueError("File processing failed on Gemini server")
-                
-                # Configure model
-                model_config = get_model_config(model_id)
-                if not model_config:
-                    raise ValueError(f"Model {model_id} not found")
-                
-                # Configure model with thinking budget if supported
-                if model_config.get("supports_thinking"):
-                    thinking_budget = get_thinking_budget(model_id, thinking_budget_level)
-                    generation_config = {
-                        "thinkingBudget": thinking_budget
-                    }
-                    model = genai.GenerativeModel(
-                        model_name=model_config["model_name"],
-                        generation_config=generation_config
-                    )
-                else:
-                    model = genai.GenerativeModel(model_name=model_config["model_name"])
-                
-                # Simple transcription instruction
-                content = [
-                    "Transcribe the following audio exactly as spoken. Do not analyze or comment on the content, just provide the raw transcript:",
-                    {"file_data": {"file_uri": audio_file.uri, "mime_type": "audio/ogg"}}
-                ]
-                
-                # Get transcript
-                logger.debug("Requesting raw transcript from audio file...")
-                transcript_response = await model.generate_content_async(content)
-                raw_transcript = transcript_response.text
-                
-                # Cleanup
-                try:
-                    genai.delete_file(audio_file.name)
-                    logger.info(f"Successfully deleted Gemini file: {audio_file.name}")
-                except Exception as e:
-                    logger.warning(f"Could not delete Gemini file {audio_file.name}: {e}")
-                
-                return raw_transcript
-                
-            except Exception as e:
-                retry_count += 1
-                if retry_count > MAX_RETRIES:
-                    logger.error(f"Max retries exceeded for transcription. Final error: {str(e)}")
-                    raise
-                
-                logger.warning(f"Transcription failed (attempt {retry_count}/{MAX_RETRIES}): {str(e)}. Retrying...")
-                
-                # Exponential backoff
-                wait_time = (2 ** retry_count) + random.uniform(0, 1)
-                await asyncio.sleep(wait_time)
-                
-                # Cleanup file if needed
-                if audio_file is not None:
-                    try:
-                        genai.delete_file(audio_file.name)
-                    except Exception:
-                        pass
-                    audio_file = None
-    
-    except Exception as e:
-        logger.error(f"Error transcribing audio: {e}", exc_info=True)
-        if audio_file is not None:
-            try:
-                genai.delete_file(audio_file.name)
-            except Exception:
-                pass
-        return None
-
-
-async def process_audio_with_gemini(
-    audio_file_path: str, 
-    mode: str, 
-    language: str = 'ru',
-    protocol: str = DEFAULT_PROTOCOL,
-    direct_model: str = DEFAULT_DIRECT_MODEL,
-    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL,
-    processing_model: str = DEFAULT_PROCESSING_MODEL,
-    thinking_budget_level: str = 'medium'
-) -> tuple[str | None, str | None]:
-    """Main entry point for processing audio with Gemini using selected protocol.
-    
-    Args:
-        audio_file_path: Path to the audio file.
-        mode: The desired processing mode (e.g., 'brief', 'detailed').
-        language: The language for the summary output ('en', 'ru', 'kk').
-        protocol: The protocol to use ('direct' or 'transcript').
-        direct_model: Model for direct protocol.
-        transcription_model: Model for transcription in transcript protocol.
-        processing_model: Model for processing in transcript protocol.
-        thinking_budget_level: Thinking budget level for models that support it.
-        
-    Returns:
-        A tuple containing (summary_text, transcript_text).
-    """
-    logger.info(f"Processing audio with protocol '{protocol}', mode '{mode}', language '{language}'")
-    
-    if protocol == 'transcript':
-        return await process_audio_with_gemini_transcript(
-            audio_file_path=audio_file_path,
-            mode=mode,
-            language=language,
-            transcription_model_id=transcription_model,
-            processing_model_id=processing_model,
-            thinking_budget_level=thinking_budget_level
-        )
-    else:
-        # Default to direct protocol
-        return await process_audio_with_gemini_direct(
-            audio_file_path=audio_file_path,
-            mode=mode,
-            language=language,
-            model_id=direct_model,
-            thinking_budget_level=thinking_budget_level
-        )
+}
