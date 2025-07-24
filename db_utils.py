@@ -58,9 +58,9 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                 CREATE TABLE IF NOT EXISTS user_preferences (
                     user_id BIGINT PRIMARY KEY,
                     language TEXT DEFAULT 'ru',
-                    protocol TEXT DEFAULT 'direct',
-                    direct_model TEXT DEFAULT 'gemini-2.0-flash',
-                    transcription_model TEXT DEFAULT 'gemini-2.5-flash',
+                    protocol TEXT DEFAULT 'transcript',
+                    direct_model TEXT DEFAULT 'gemini-2.5-flash',
+                    transcription_model TEXT DEFAULT 'deepgram-nova3',
                     processing_model TEXT DEFAULT 'gemini-2.5-flash',
                     thinking_budget_level TEXT DEFAULT 'medium',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -127,15 +127,15 @@ async def create_tables(pool: asyncpg.Pool) -> None:
             try:
                 await connection.execute("""
                     ALTER TABLE user_preferences 
-                    ADD COLUMN IF NOT EXISTS protocol TEXT DEFAULT 'direct';
+                    ADD COLUMN IF NOT EXISTS protocol TEXT DEFAULT 'transcript';
                 """)
                 await connection.execute("""
                     ALTER TABLE user_preferences 
-                    ADD COLUMN IF NOT EXISTS direct_model TEXT DEFAULT 'gemini-2.0-flash';
+                    ADD COLUMN IF NOT EXISTS direct_model TEXT DEFAULT 'gemini-2.5-flash';
                 """)
                 await connection.execute("""
                     ALTER TABLE user_preferences 
-                    ADD COLUMN IF NOT EXISTS transcription_model TEXT DEFAULT 'gemini-2.5-flash';
+                    ADD COLUMN IF NOT EXISTS transcription_model TEXT DEFAULT 'deepgram-nova3';
                 """)
                 await connection.execute("""
                     ALTER TABLE user_preferences 

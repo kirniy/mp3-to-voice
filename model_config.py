@@ -91,10 +91,10 @@ PROTOCOLS = {
 }
 
 # Default configurations
-DEFAULT_PROTOCOL = "direct"
+DEFAULT_PROTOCOL = "transcript"
 DEFAULT_TRANSCRIPTION_MODEL = "deepgram-nova3"  # For transcript protocol - Ultra-fast Deepgram Nova-3
 DEFAULT_PROCESSING_MODEL = "gemini-2.5-flash"     # For mode processing in transcript protocol
-DEFAULT_DIRECT_MODEL = "gemini-2.0-flash"         # For direct protocol
+DEFAULT_DIRECT_MODEL = "gemini-2.5-flash"         # For direct protocol
 
 # Model selection constraints
 MODEL_CONSTRAINTS = {
