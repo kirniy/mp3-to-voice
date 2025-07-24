@@ -1,32 +1,54 @@
-import asyncio, replicate, logging
+import asyncio, replicate, logging, time
 log = logging.getLogger(__name__)
 
-async def gpt4o_transcribe(path: str, lang: str = "ru") -> str | None:
+async def gpt4o_transcribe(path: str, lang: str = "ru",
+                           max_wait: int = 90) -> str | None:
     """
-    GPT‑4o via Replicate, ~5‑6 s for a 75 s clip.
-    • uploads local OGA
-    • waits blocking (stream=False, wait=True)
-    • returns full text or None
+    Transcribe with Replicate GPT‑4o.
+      • uploads local OGA
+      • polls until status=="succeeded" or max_wait seconds
+      • returns text or None
     """
     try:
-        def _sync():
-            output = replicate.run(
-                "openai/gpt-4o-transcribe",
-                input={
-                    "audio_file": open(path, "rb"),   # ← original file
-                    "language": lang,
-                    "response_format": "text",
-                    "temperature": 0
-                },
-                wait=True,             # block until status=="succeeded"
-                use_file_output=False
-            )
-            return "".join(output).strip()            # list[str] → str
-        text = await asyncio.to_thread(_sync)
-        log.info("Replicate transcript length: %s chars", len(text) if text else 0)
+        start_ts = time.time()
+
+        # Convert OGA to WAV for better compatibility
+        from audio_utils import to_wav
+        wav_path = await to_wav(path)
+        
+        # 1) create prediction (non‑blocking)
+        pred = replicate.predictions.create(
+            model="openai/gpt-4o-transcribe",
+            input={
+                "audio_file": open(wav_path, "rb"),
+                "language": lang,
+                "temperature": 0
+            },
+            stream=False
+        )
+        log.info("Replicate job %s queued (status=%s)", pred.id, pred.status)
+
+        # 2) poll
+        while pred.status not in ("succeeded", "failed", "canceled"):
+            await asyncio.sleep(2)
+            pred = replicate.predictions.get(pred.id)
+            log.debug("Job %s status → %s", pred.id, pred.status)
+            if time.time() - start_ts > max_wait:
+                log.warning("Replicate job %s timed out after %s s", pred.id, max_wait)
+                replicate.predictions.cancel(pred.id)
+                return None
+
+        if pred.status != "succeeded":
+            error_msg = getattr(pred, 'error', None)
+            log.error("Replicate job %s ended as %s: %s", pred.id, pred.status, error_msg)
+            return None
+
+        text = "".join(pred.output).strip() if pred.output else ""
+        log.info("Replicate job %s done (%d chars)", pred.id, len(text))
         return text or None
-    except Exception as e:
-        log.exception("Replicate STT failed:")
+
+    except Exception as exc:
+        log.exception("Replicate STT hard error:")
         return None
 
 # Keep old function name for backward compatibility
