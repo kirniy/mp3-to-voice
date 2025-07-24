@@ -1,12 +1,17 @@
 import openai
 import asyncio
 import logging
+import os
 from openai import AsyncOpenAI
 
 log = logging.getLogger(__name__)
 
 # Initialize async client (reads OPENAI_API_KEY from environment)
-client = AsyncOpenAI()
+# Make sure we're using the standard API endpoint
+client = AsyncOpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url="https://api.openai.com/v1"  # Explicitly set base URL
+)
 
 async def gpt4o_transcribe_openai(path: str, lang: str = "auto") -> str | None:
     """
@@ -22,10 +27,17 @@ async def gpt4o_transcribe_openai(path: str, lang: str = "auto") -> str | None:
         Transcribed text or None on error
     """
     try:
+        # OpenAI requires a filename with extension
+        filename = os.path.basename(path)
+        if not filename:
+            filename = "audio.oga"
+        
+        log.info(f"Attempting OpenAI transcription with file: {filename}")
+            
         with open(path, "rb") as audio_file:
             response = await client.audio.transcriptions.create(
-                model="gpt-4o",  # GPT-4o model for transcription
-                file=audio_file,
+                model="gpt-4o-transcribe",  # GPT-4o transcribe model
+                file=(filename, audio_file, "audio/ogg"),
                 language=None if lang == "auto" else lang,
                 response_format="text"  # fastest: just text, no JSON
             )

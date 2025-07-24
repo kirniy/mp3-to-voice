@@ -49,7 +49,7 @@ MODELS = {
         "supports_audio": True,
         "supports_thinking": False,
         "description": "Direct OpenAI GPT-4o transcription - fastest and most accurate",
-        "model_name": "gpt-4o",
+        "model_name": "gpt-4o-transcribe",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "OPENAI_API_KEY"
     }
