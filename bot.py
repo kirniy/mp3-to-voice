@@ -2545,8 +2545,11 @@ async def button_callback(update: Update, context: CallbackContext):
         )
         return
     
-    elif action.startswith("set_direct_model:"):
-        model_id = action.replace("set_direct_model:", "")
+    elif action == "set_direct_model":
+        if len(data_parts) < 2:
+            await query.answer("Missing model ID", show_alert=True)
+            return
+        model_id = data_parts[1]
         success = await set_user_model_preference(pool, user_id, "direct_model", model_id)
         if success:
             await query.answer(f"Direct model set to {model_id}")
@@ -2555,8 +2558,11 @@ async def button_callback(update: Update, context: CallbackContext):
             await query.answer("Failed to update model", show_alert=True)
         return
     
-    elif action.startswith("set_transcription_model:"):
-        model_id = action.replace("set_transcription_model:", "")
+    elif action == "set_transcription_model":
+        if len(data_parts) < 2:
+            await query.answer("Missing model ID", show_alert=True)
+            return
+        model_id = data_parts[1]
         success = await set_user_model_preference(pool, user_id, "transcription_model", model_id)
         if success:
             await query.answer(f"Transcription model set to {model_id}")
@@ -2565,8 +2571,11 @@ async def button_callback(update: Update, context: CallbackContext):
             await query.answer("Failed to update model", show_alert=True)
         return
     
-    elif action.startswith("set_processing_model:"):
-        model_id = action.replace("set_processing_model:", "")
+    elif action == "set_processing_model":
+        if len(data_parts) < 2:
+            await query.answer("Missing model ID", show_alert=True)
+            return
+        model_id = data_parts[1]
         success = await set_user_model_preference(pool, user_id, "processing_model", model_id)
         if success:
             await query.answer(f"Processing model set to {model_id}")
@@ -2575,8 +2584,11 @@ async def button_callback(update: Update, context: CallbackContext):
             await query.answer("Failed to update model", show_alert=True)
         return
     
-    elif action.startswith("set_thinking_level:"):
-        level = action.replace("set_thinking_level:", "")
+    elif action == "set_thinking_level":
+        if len(data_parts) < 2:
+            await query.answer("Missing thinking level", show_alert=True)
+            return
+        level = data_parts[1]
         success = await set_user_model_preference(pool, user_id, "thinking_budget_level", level)
         if success:
             await query.answer(f"Thinking budget set to {level}")
