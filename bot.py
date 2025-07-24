@@ -1956,17 +1956,16 @@ async def handle_video_message(update: Update, context: CallbackContext) -> None
         # 2. Get chat's default mode or use system default
         mode = await get_chat_default_mode(pool, message.chat_id, DEFAULT_MODE)
         
-        # 3. Get user's model preferences
-        protocol = await get_user_model_preference(pool, user.id, "protocol")
+        # 3. Get user's model preferences - but force direct protocol for videos
+        protocol = "direct"  # Always use direct protocol for videos
         direct_model = await get_user_model_preference(pool, user.id, "direct_model")
         transcription_model = await get_user_model_preference(pool, user.id, "transcription_model")
         processing_model = await get_user_model_preference(pool, user.id, "processing_model")
         thinking_budget_level = await get_user_model_preference(pool, user.id, "thinking_budget_level")
         
-        # 4. Process video with Gemini or extract audio for other models
+        # 4. Process video with Gemini (always direct protocol)
         try:
-            logger.info(f"Processing video with protocol={protocol}, direct_model={direct_model}, "
-                       f"transcription_model={transcription_model}, processing_model={processing_model}")
+            logger.info(f"Processing video with forced direct protocol, direct_model={direct_model}")
             
             from gemini_utils import process_video_with_gemini
             
@@ -1974,7 +1973,7 @@ async def handle_video_message(update: Update, context: CallbackContext) -> None
                 temp_video_file.name, 
                 mode, 
                 chat_lang,
-                protocol=protocol,
+                protocol="direct",  # Force direct protocol
                 direct_model=direct_model,
                 transcription_model=transcription_model,
                 processing_model=processing_model,

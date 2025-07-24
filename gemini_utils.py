@@ -2199,16 +2199,9 @@ async def process_video_with_gemini_direct(
         logger.error(f"Unknown model ID: {model_id}")
         return None, None
     
-    # Configure model with thinking budget if supported
-    if model_config.get('supports_thinking'):
-        thinking_budget = get_thinking_budget(model_id, thinking_budget_level)
-        logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget}")
-        model = genai.GenerativeModel(model_config['model_name'])
-        model._system_instruction = genai.protos.Content(
-            parts=[genai.protos.Part(thought=True, text="")]
-        )
-    else:
-        model = genai.GenerativeModel(model_config['model_name'])
+    # Configure model - disable thinking for video processing
+    # Video parts don't support thinking mode
+    model = genai.GenerativeModel(model_config['model_name'])
     
     # Special handling for diagram mode
     if mode == "diagram":
@@ -2221,13 +2214,22 @@ async def process_video_with_gemini_direct(
         transcript = await get_video_transcript(video_file_path, language, model)
         return None, transcript
     
-    # Get the appropriate prompt
+    # Get the appropriate prompt with video-specific instructions
+    video_instruction = """
+IMPORTANT: This is a video. Please analyze:
+1. All spoken words and dialogue
+2. Visual actions and what's happening on screen
+3. Any text that appears in the video
+4. Scene changes and context
+5. Important sounds or background elements
+
+"""
     prompt_map = {
-        "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-        "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-        "bullet": UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-        "combined": UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-        "pasha": UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+        "brief": video_instruction + UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+        "detailed": video_instruction + UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+        "bullet": video_instruction + UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+        "combined": video_instruction + UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+        "pasha": video_instruction + UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
     }
     
     summary_prompt = prompt_map.get(mode)
@@ -2324,8 +2326,15 @@ async def get_video_transcript(video_path: str, language: str, model) -> str:
             logger.error(f"Failed to process video for transcript")
             return None
         
-        # Simple prompt to get transcript
-        transcript_prompt = f"Transcribe this video to text in {language}. Return only the transcript without any formatting or commentary."
+        # Comprehensive video transcription prompt
+        transcript_prompt = f"""Transcribe this video comprehensively in {language}. Include:
+1. All spoken words and dialogue
+2. Description of what's happening visually in the video
+3. Any text that appears on screen
+4. Important sounds or background audio
+5. Scene changes and visual context
+
+Provide a complete transcript that captures both audio and visual elements."""
         response = await model.generate_content_async([transcript_prompt, video_file])
         
         # Cleanup
