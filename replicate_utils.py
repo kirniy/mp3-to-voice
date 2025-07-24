@@ -7,7 +7,7 @@ async def gpt4o_transcribe_replicate(path: str, lang: str="ru") -> str | None:
     try:
         wav_path = await to_wav(path)               # convert first
         def _sync():
-            return replicate.run(
+            prediction = replicate.run(
                 "openai/gpt-4o-transcribe",
                 input={
                     "audio_file": open(wav_path, "rb"),
@@ -18,8 +18,16 @@ async def gpt4o_transcribe_replicate(path: str, lang: str="ru") -> str | None:
                 wait=True,
                 use_file_output=False
             )
+            print("Replicate prediction output type:", type(prediction))
+            return prediction
         output = await asyncio.to_thread(_sync)
-        text = "".join(output).strip() if isinstance(output, list) else str(output).strip()
+        
+        # NEW robust join ─ handles str, list, or iterator
+        if isinstance(output, str):
+            text = output.strip()
+        else:
+            text = "".join(list(output)).strip()        # force‑iterate, then join
+        
         # Replicate sometimes returns [""] – treat as failure
         return text or None
     except Exception as e:
