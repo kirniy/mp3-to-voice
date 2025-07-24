@@ -2105,3 +2105,237 @@ async def process_audio_with_gemini(
             model_id=direct_model,
             thinking_budget_level=thinking_budget_level
         )
+
+
+async def process_video_with_gemini(
+    video_file_path: str, 
+    mode: str, 
+    language: str = 'ru',
+    protocol: str = DEFAULT_PROTOCOL,
+    direct_model: str = DEFAULT_DIRECT_MODEL,
+    transcription_model: str = DEFAULT_TRANSCRIPTION_MODEL,
+    processing_model: str = DEFAULT_PROCESSING_MODEL,
+    thinking_budget_level: str = 'medium'
+) -> tuple[str | None, str | None]:
+    """Process video with Gemini using selected protocol.
+    
+    For Gemini models (2.0/2.5 Flash), sends video directly.
+    For non-Gemini models, extracts audio first.
+    
+    Args:
+        video_file_path: Path to the video file.
+        mode: The desired processing mode (e.g., 'brief', 'detailed').
+        language: The language for the summary output ('en', 'ru', 'kk').
+        protocol: The protocol to use ('direct' or 'transcript').
+        direct_model: Model for direct protocol.
+        transcription_model: Model for transcription in transcript protocol.
+        processing_model: Model for processing in transcript protocol.
+        thinking_budget_level: Thinking budget level for models that support it.
+        
+    Returns:
+        A tuple containing (summary_text, transcript_text).
+    """
+    logger.info(f"Processing video with protocol '{protocol}', mode '{mode}', language '{language}'")
+    
+    from model_config import get_model_config
+    
+    # Check if models support direct video processing
+    if protocol == 'direct':
+        model_config = get_model_config(direct_model)
+        if model_config and model_config.get('provider') == 'gemini':
+            # Gemini models can process video directly
+            return await process_video_with_gemini_direct(
+                video_file_path=video_file_path,
+                mode=mode,
+                language=language,
+                model_id=direct_model,
+                thinking_budget_level=thinking_budget_level
+            )
+    
+    # For transcript protocol or non-Gemini models, extract audio
+    from audio_utils import extract_audio_from_video
+    audio_path = await extract_audio_from_video(video_file_path)
+    
+    try:
+        # Process extracted audio
+        return await process_audio_with_gemini(
+            audio_file_path=audio_path,
+            mode=mode,
+            language=language,
+            protocol=protocol,
+            direct_model=direct_model,
+            transcription_model=transcription_model,
+            processing_model=processing_model,
+            thinking_budget_level=thinking_budget_level
+        )
+    finally:
+        # Clean up extracted audio file
+        import os
+        try:
+            os.unlink(audio_path)
+        except:
+            pass
+
+
+async def process_video_with_gemini_direct(
+    video_file_path: str,
+    mode: str,
+    language: str = 'ru',
+    model_id: str = DEFAULT_DIRECT_MODEL,
+    thinking_budget_level: str = 'medium'
+) -> tuple[str | None, str | None]:
+    """Process video directly with Gemini models using direct protocol.
+    
+    Similar to audio processing but sends video file with video/mp4 mime type.
+    """
+    from model_config import get_model_config, get_thinking_budget
+    
+    # Get mode prompts from imported module
+    mode_prompts = get_mode_prompts()
+    
+    # Get the appropriate model
+    model_config = get_model_config(model_id)
+    if not model_config:
+        logger.error(f"Unknown model ID: {model_id}")
+        return None, None
+    
+    # Configure model with thinking budget if supported
+    if model_config.get('supports_thinking'):
+        thinking_budget = get_thinking_budget(model_id, thinking_budget_level)
+        logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget}")
+        model = genai.GenerativeModel(model_config['model_name'])
+        model._system_instruction = genai.protos.Content(
+            parts=[genai.protos.Part(thought=True, text="")]
+        )
+    else:
+        model = genai.GenerativeModel(model_config['model_name'])
+    
+    # Special handling for diagram mode
+    if mode == "diagram":
+        # For diagram mode we only need the transcript text
+        return None, await get_video_transcript(video_file_path, language, model)
+    
+    # Special handling for as_is mode
+    if mode == "as_is":
+        logger.info(f"Returning video transcript as-is for {language}.")
+        transcript = await get_video_transcript(video_file_path, language, model)
+        return None, transcript
+    
+    # Get the appropriate prompt
+    prompt_map = {
+        "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+        "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+        "bullet": UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+        "combined": UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+        "pasha": UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+    }
+    
+    summary_prompt = prompt_map.get(mode)
+    if not summary_prompt:
+        logger.error(f"Internal error: No prompt found for mode {mode}")
+        return None, None
+    
+    retry_count = 0
+    video_file = None
+    
+    try:
+        while retry_count <= MAX_RETRIES:
+            try:
+                # Upload video file
+                if video_file is None:
+                    logger.debug("Uploading video file to Gemini...")
+                    video_file = genai.upload_file(
+                        path=video_file_path, 
+                        mime_type="video/mp4"
+                    )
+                    logger.info(f"Video file uploaded successfully: {video_file.name}")
+                
+                # Wait for processing
+                while video_file.state.name == "PROCESSING":
+                    logger.debug("File still processing...")
+                    await asyncio.sleep(1)
+                    video_file = genai.get_file(video_file.name)
+                
+                if video_file.state.name == "FAILED":
+                    logger.error(f"Gemini file processing failed for {video_file.name}")
+                    try:
+                        genai.delete_file(video_file.name)
+                        video_file = None
+                    except:
+                        pass
+                    raise Exception("File processing failed")
+                
+                # Prepare video prompt + file
+                logger.debug(f"Requesting {mode} summary in {language}...")
+                response = await model.generate_content_async([summary_prompt, video_file])
+                
+                # Extract content - no separate transcript extraction for video
+                summary_text = response.text
+                transcript_text = await get_video_transcript(video_file_path, language, model)
+                
+                # Cleanup
+                try:
+                    genai.delete_file(video_file.name)
+                    logger.info(f"Successfully deleted Gemini file: {video_file.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete file {video_file.name}: {e}")
+                
+                logger.info(f"{mode.capitalize()} summary generated in {language} using direct video protocol.")
+                return summary_text, transcript_text
+                
+            except Exception as e:
+                logger.error(f"Error on attempt {retry_count + 1}: {e}", exc_info=True)
+                retry_count += 1
+                if retry_count <= MAX_RETRIES:
+                    logger.info(f"Retrying... (attempt {retry_count}/{MAX_RETRIES})")
+                    await asyncio.sleep(RETRY_DELAY)
+                else:
+                    logger.error(f"Max retries reached. Processing failed.")
+                    # Cleanup on final failure
+                    if video_file:
+                        try:
+                            genai.delete_file(video_file.name)
+                        except:
+                            pass
+                    return None, None
+                    
+    except Exception as e:
+        logger.error(f"Unexpected error in video processing: {e}", exc_info=True)
+        if video_file:
+            try:
+                genai.delete_file(video_file.name)
+            except:
+                pass
+        return None, None
+
+
+async def get_video_transcript(video_path: str, language: str, model) -> str:
+    """Extract transcript from video using Gemini model."""
+    try:
+        # Upload video for transcript extraction
+        video_file = genai.upload_file(path=video_path, mime_type="video/mp4")
+        
+        # Wait for processing
+        while video_file.state.name == "PROCESSING":
+            await asyncio.sleep(1)
+            video_file = genai.get_file(video_file.name)
+        
+        if video_file.state.name == "FAILED":
+            logger.error(f"Failed to process video for transcript")
+            return None
+        
+        # Simple prompt to get transcript
+        transcript_prompt = f"Transcribe this video to text in {language}. Return only the transcript without any formatting or commentary."
+        response = await model.generate_content_async([transcript_prompt, video_file])
+        
+        # Cleanup
+        try:
+            genai.delete_file(video_file.name)
+        except:
+            pass
+            
+        return response.text
+        
+    except Exception as e:
+        logger.error(f"Failed to get video transcript: {e}")
+        return None

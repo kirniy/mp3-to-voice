@@ -9,6 +9,7 @@ MODELS = {
         "name": "Gemini 2.0 Flash",
         "provider": "gemini",
         "supports_audio": True,
+        "supports_video": True,
         "supports_thinking": False,
         "description": "Fast general-purpose model",
         "model_name": "models/gemini-2.0-flash"
@@ -18,6 +19,7 @@ MODELS = {
         "name": "Gemini 2.5 Flash",
         "provider": "gemini",
         "supports_audio": True,
+        "supports_video": True,
         "supports_thinking": True,
         "description": "Latest Flash model with thinking capabilities",
         "model_name": "models/gemini-2.5-flash",
@@ -55,12 +57,12 @@ MODELS = {
     },
     
     "deepgram-nova3": {
-        "name": "Deepgram Nova-2",
+        "name": "Deepgram Nova-3",
         "provider": "deepgram",
         "supports_audio": True,
         "supports_thinking": False,
-        "description": "Deepgram Nova-2 - Ultra-fast transcription with excellent Russian support",
-        "model_name": "nova-2",
+        "description": "Deepgram Nova-3 - Ultra-fast multilingual transcription (Russian, English, Spanish, French, German, Hindi, Portuguese, Japanese, Italian, Dutch)",
+        "model_name": "nova-3",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "DEEPGRAM_API_KEY"
     }
@@ -103,7 +105,10 @@ MODEL_CONSTRAINTS = {
     "text_processing": ["gemini-2.0-flash", "gemini-2.5-flash"],
     
     # Which models can handle direct audio-to-mode processing
-    "direct_audio": ["gemini-2.0-flash", "gemini-2.5-flash"]
+    "direct_audio": ["gemini-2.0-flash", "gemini-2.5-flash"],
+    
+    # Which models can handle direct video processing
+    "direct_video": ["gemini-2.0-flash", "gemini-2.5-flash"]
 }
 
 def get_model_config(model_id: str) -> dict:

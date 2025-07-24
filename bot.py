@@ -1912,6 +1912,207 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         # Bot already replied, maybe send a follow-up error?
         # await sent_message.reply_text("Warning: Could not save to history.")
 
+
+@send_typing_action
+async def handle_video_message(update: Update, context: CallbackContext) -> None:
+    """Handles video messages and video notes (circles) for transcription and summarization."""
+    message = update.message
+    user = update.effective_user
+    video = message.video or message.video_note  # Handle both video and video_note
+    pool = context.bot_data.get('db_pool')
+
+    if not video:
+        logger.warning(f"handle_video_message called but no video found in message {message.message_id}")
+        return
+
+    if not pool:
+        logger.error("Database pool not found in bot_data")
+        await message.reply_text(get_dual_string('error'), quote=True)
+        return
+
+    # Get chat's language preference
+    chat_lang = await get_chat_language(pool, message.chat_id)
+    
+    # Check if the bot is paused for this chat
+    is_paused = await get_chat_paused_status(pool, message.chat_id)
+    if is_paused:
+        logger.info(f"Ignoring video message {message.message_id} because bot is paused for chat {message.chat_id}")
+        return
+    
+    logger.info(f"Received video message {message.message_id} from user {user.id} (duration: {video.duration}s, chat language: {chat_lang})")
+
+    # Acknowledge receipt with chat's preferred language
+    status_message = await message.reply_text(
+        get_string('processing', chat_lang).split('\n')[0], 
+        reply_to_message_id=message.message_id
+    )
+
+    # 1. Download video file
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as temp_video_file:
+        file = await video.get_file()
+        await file.download_to_drive(custom_path=temp_video_file.name)
+        logger.info(f"Downloaded video file {file.file_id} to {temp_video_file.name}")
+
+        # 2. Get chat's default mode or use system default
+        mode = await get_chat_default_mode(pool, message.chat_id, DEFAULT_MODE)
+        
+        # 3. Get user's model preferences
+        protocol = await get_user_model_preference(pool, user.id, "protocol")
+        direct_model = await get_user_model_preference(pool, user.id, "direct_model")
+        transcription_model = await get_user_model_preference(pool, user.id, "transcription_model")
+        processing_model = await get_user_model_preference(pool, user.id, "processing_model")
+        thinking_budget_level = await get_user_model_preference(pool, user.id, "thinking_budget_level")
+        
+        # 4. Process video with Gemini or extract audio for other models
+        try:
+            logger.info(f"Processing video with protocol={protocol}, direct_model={direct_model}, "
+                       f"transcription_model={transcription_model}, processing_model={processing_model}")
+            
+            from gemini_utils import process_video_with_gemini
+            
+            summary_text, transcript_text = await process_video_with_gemini(
+                temp_video_file.name, 
+                mode, 
+                chat_lang,
+                protocol=protocol,
+                direct_model=direct_model,
+                transcription_model=transcription_model,
+                processing_model=processing_model,
+                thinking_budget_level=thinking_budget_level
+            )
+        except Exception as e:
+            logger.error(f"Exception in process_video_with_gemini: {str(e)}", exc_info=True)
+            summary_text = None
+            transcript_text = None
+
+    # 5. Handle Gemini Response (similar to voice handling)
+    if transcript_text is None:
+        logger.error(f"Processing failed for video message {message.message_id}")
+        await status_message.edit_text(get_dual_string('error'))
+        return
+
+    # Special handling for diagram mode (same as voice)
+    if mode == 'diagram':
+        # Update status message to indicate diagram generation
+        diagram_processing_msg = "Создание диаграммы..."
+        if chat_lang == 'en':
+            diagram_processing_msg = "Creating diagram..."
+        elif chat_lang == 'kk':
+            diagram_processing_msg = "Диаграмма жасау..."
+            
+        await status_message.edit_text(diagram_processing_msg)
+        
+        # Generate diagram data from transcript
+        diagram_data = await generate_diagram_data(transcript_text, chat_lang, user.full_name)
+        
+        if diagram_data:
+            # Create PNG from diagram data
+            png_bytes = render_mermaid_to_png(
+                create_mermaid_syntax(diagram_data, chat_lang),
+                diagram_data,
+                chat_lang
+            )
+            
+            if png_bytes:
+                # Create bio with PNG bytes for sending as photo
+                bio = io.BytesIO(png_bytes)
+                bio.name = 'diagram.png'
+                
+                # Create caption with attribution
+                moscow_tz = pytz.timezone('Europe/Moscow')
+                moscow_time = message.date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+                caption = f"{user.full_name} | {moscow_time}"
+                
+                # Send the diagram as photo with reply markup
+                sent_message = await message.reply_photo(
+                    photo=bio,
+                    caption=caption,
+                    reply_markup=create_action_buttons(message.message_id, chat_lang),
+                    reply_to_message_id=message.message_id
+                )
+                
+                # Delete the processing status message
+                await status_message.delete()
+                
+                # Save diagram data as JSON string
+                try:
+                    diagram_json = json.dumps(diagram_data, ensure_ascii=False)
+                except:
+                    diagram_json = None
+                
+                # Save summary details to DB (store video file ID)
+                record_id = await save_summary(
+                    pool=pool,
+                    user_id=user.id,
+                    chat_id=message.chat_id,
+                    original_message_id=message.message_id,
+                    summary_message_id=sent_message.message_id,
+                    audio_file_id=video.file_id,  # Store video file ID in audio_file_id column for backwards compatibility
+                    mode=mode,
+                    summary_text=diagram_json,
+                    transcript_text=transcript_text,
+                    video_file_id=video.file_id  # Also store in dedicated video column
+                )
+                
+                if record_id is None:
+                    logger.error(f"Failed to save diagram to DB for video message {message.message_id}")
+                
+                return
+            else:
+                logger.error("Failed to render diagram to PNG")
+        else:
+            logger.error("Failed to generate diagram data")
+        
+        # If we reach here, diagram generation failed
+        mode = 'as_is'
+        display_text = transcript_text
+        
+    # For non-diagram modes or if diagram generation failed
+    if mode == 'as_is' or mode == 'transcript':
+        display_text = transcript_text
+    else:
+        display_text = summary_text if summary_text is not None else transcript_text
+    
+    # 6. Format response header with emoji
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    moscow_time = message.date.astimezone(moscow_tz).strftime('%d.%m.%Y %H:%M МСК')
+    moscow_time_str = escape_markdown(moscow_time, version=2)
+    user_name = escape_markdown(message.from_user.full_name, version=2)
+    header = f"*{user_name}* \\| {moscow_time_str}"
+    
+    # 7. Properly escape content for MarkdownV2
+    escaped_display_text = escape_markdown(display_text, version=2)
+    final_text = f"{header}\n\n{escaped_display_text}"
+    
+    # 8. Create reply markup with mode selection buttons
+    reply_markup = create_action_buttons(message.message_id, chat_lang)
+    
+    # 9. Send response message
+    sent_message = await status_message.edit_text(
+        final_text,
+        reply_markup=reply_markup,
+        parse_mode='MarkdownV2'
+    )
+    logger.info(f"Sent summary message {sent_message.message_id} for video message {message.message_id}")
+
+    # 10. Save summary details to DB
+    record_id = await save_summary(
+        pool=pool,
+        user_id=user.id,
+        chat_id=message.chat_id,
+        original_message_id=message.message_id,
+        summary_message_id=sent_message.message_id,
+        audio_file_id=video.file_id,  # Store video file ID for backwards compatibility
+        mode=mode,
+        summary_text=summary_text,
+        transcript_text=transcript_text,
+        video_file_id=video.file_id  # Also store in dedicated video column
+    )
+
+    if record_id is None:
+        logger.error(f"Failed to save summary to DB for video message {message.message_id}")
+
+
 # --- Callback Query Handler ---
 
 async def button_callback(update: Update, context: CallbackContext):
@@ -2976,6 +3177,9 @@ def main() -> None:
 
     # Handler for Voice messages (Summarization)
     application.add_handler(MessageHandler(filters.VOICE, handle_voice_message)) # Added
+    
+    # Handler for Video messages and Video notes (circles)
+    application.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_video_message))
 
     # Handler for Callback Queries
     application.add_handler(CallbackQueryHandler(button_callback)) # Added

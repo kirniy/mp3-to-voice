@@ -8,13 +8,13 @@ DG_KEY = os.getenv("DEEPGRAM_API_KEY")
 
 async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
     """
-    Send the original OGA/OGG file to Deepgram Nova-2 and return the transcript.
-    Using Nova-2 for better Russian language support.
+    Send the original OGA/OGG file to Deepgram Nova-3 and return the transcript.
+    Nova-3 supports multilingual transcription including Russian.
     Expects DEEPGRAM_API_KEY to be set in env.
     
     Args:
         audio_path: Path to audio file (OGA/OGG/MP3/etc)
-        lang: Language code (e.g., "ru", "en")
+        lang: Language code (e.g., "ru", "en") - ignored for Nova-3 multilingual
         
     Returns:
         Transcribed text or None on error
@@ -37,15 +37,15 @@ async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
         }
 
         # Configure transcription options
-        # Using Nova-2 for better Russian support
+        # Nova-3 uses multilingual mode for all languages
         options = PrerecordedOptions(
-            model="nova-2",  # Nova-2 has better language-specific support
-            language=lang,    # Can use specific language codes like "ru"
+            model="nova-3",       # Nova-3 with multilingual support
+            language="multi",     # Multilingual mode supports Russian, English, etc.
             smart_format=True,
             punctuate=True,
         )
         
-        log.info(f"Attempting Deepgram Nova-2 transcription for language: {lang}")
+        log.info(f"Attempting Deepgram Nova-3 multilingual transcription (requested lang: {lang})")
         
         # Transcribe using the sync/rest API (async not needed for file transcription)
         response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
@@ -57,5 +57,5 @@ async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
         return transcript
         
     except Exception as e:
-        log.error(f"Deepgram Nova-2 failed: {e}")
+        log.error(f"Deepgram Nova-3 failed: {e}")
         return None

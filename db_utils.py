@@ -18,6 +18,7 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                     original_telegram_message_id BIGINT NOT NULL,
                     summary_telegram_message_id BIGINT NOT NULL,
                     telegram_audio_file_id TEXT NOT NULL,
+                    telegram_video_file_id TEXT,
                     mode TEXT NOT NULL,
                     transcript_text TEXT NOT NULL,
                     summary_text TEXT,
@@ -147,6 +148,16 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                 logger.info("Added model configuration columns to user_preferences table")
             except Exception as e:
                 logger.warning(f"Error adding model configuration columns (likely already exist): {e}")
+                
+            # Add telegram_video_file_id column if it doesn't exist
+            try:
+                await connection.execute("""
+                    ALTER TABLE summaries 
+                    ADD COLUMN IF NOT EXISTS telegram_video_file_id TEXT;
+                """)
+                logger.info("Added telegram_video_file_id column to summaries table or verified it exists")
+            except Exception as e:
+                logger.warning(f"Error adding telegram_video_file_id column (likely already exists): {e}")
 
             logger.info("Database tables created or verified")
             
@@ -164,15 +175,16 @@ async def save_summary(
     mode: str,
     summary_text: str | None,
     transcript_text: str | None = None,
+    video_file_id: str | None = None,
 ) -> int | None:
     """Saves summary details to the database. Returns the new record ID or None on failure."""
     async with pool.acquire() as connection:
         try:
             record_id = await connection.fetchval("""
-                INSERT INTO summaries (user_id, chat_id, original_telegram_message_id, summary_telegram_message_id, telegram_audio_file_id, mode, summary_text, transcript_text)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO summaries (user_id, chat_id, original_telegram_message_id, summary_telegram_message_id, telegram_audio_file_id, mode, summary_text, transcript_text, telegram_video_file_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING id;
-            """, user_id, chat_id, original_message_id, summary_message_id, audio_file_id, mode, summary_text, transcript_text)
+            """, user_id, chat_id, original_message_id, summary_message_id, audio_file_id, mode, summary_text, transcript_text, video_file_id)
             logger.info(f"Saved summary record with ID: {record_id} for user {user_id}, original msg {original_message_id}")
             return record_id
         except Exception as e:
