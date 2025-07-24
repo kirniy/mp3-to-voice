@@ -8,7 +8,8 @@ DG_KEY = os.getenv("DEEPGRAM_API_KEY")
 
 async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
     """
-    Send the original OGA/OGG file to Deepgram Nova-3 and return the transcript.
+    Send the original OGA/OGG file to Deepgram Nova-2 and return the transcript.
+    Using Nova-2 for better Russian language support.
     Expects DEEPGRAM_API_KEY to be set in env.
     
     Args:
@@ -35,15 +36,16 @@ async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
             "buffer": buffer_data,
         }
 
-        # Configure transcription options for Nova-3
+        # Configure transcription options
+        # Using Nova-2 for better Russian support
         options = PrerecordedOptions(
-            model="nova-3",
-            language=lang,
+            model="nova-2",  # Nova-2 has better language-specific support
+            language=lang,    # Can use specific language codes like "ru"
             smart_format=True,
             punctuate=True,
         )
         
-        log.info(f"Attempting Deepgram Nova-3 transcription for language: {lang}")
+        log.info(f"Attempting Deepgram Nova-2 transcription for language: {lang}")
         
         # Transcribe using the sync/rest API (async not needed for file transcription)
         response = deepgram.listen.rest.v("1").transcribe_file(payload, options)
@@ -55,5 +57,5 @@ async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
         return transcript
         
     except Exception as e:
-        log.error(f"Deepgram Nova-3 failed: {e}")
+        log.error(f"Deepgram Nova-2 failed: {e}")
         return None

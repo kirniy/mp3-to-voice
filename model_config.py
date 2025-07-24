@@ -55,12 +55,12 @@ MODELS = {
     },
     
     "deepgram-nova3": {
-        "name": "Deepgram Nova-3",
+        "name": "Deepgram Nova-2",
         "provider": "deepgram",
         "supports_audio": True,
         "supports_thinking": False,
-        "description": "Deepgram Nova-3 - Latest model, ultra-fast with superior accuracy",
-        "model_name": "nova-3",
+        "description": "Deepgram Nova-2 - Ultra-fast transcription with excellent Russian support",
+        "model_name": "nova-2",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "DEEPGRAM_API_KEY"
     }
