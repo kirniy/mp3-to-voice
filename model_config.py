@@ -52,6 +52,17 @@ MODELS = {
         "model_name": "gpt-4o-transcribe",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "OPENAI_API_KEY"
+    },
+    
+    "deepgram-nova3": {
+        "name": "Deepgram Nova-3",
+        "provider": "deepgram",
+        "supports_audio": True,
+        "supports_thinking": False,
+        "description": "Deepgram Nova-3 - Ultra-fast, high-accuracy transcription (~4-6s latency)",
+        "model_name": "nova-3",
+        "transcription_only": True,  # Can only be used for transcription, not processing
+        "requires_api_key": "DEEPGRAM_API_KEY"
     }
 }
 
@@ -79,14 +90,14 @@ PROTOCOLS = {
 
 # Default configurations
 DEFAULT_PROTOCOL = "direct"
-DEFAULT_TRANSCRIPTION_MODEL = "gemini-2.5-flash"  # For transcript protocol
+DEFAULT_TRANSCRIPTION_MODEL = "deepgram-nova3"  # For transcript protocol - Ultra-fast Deepgram Nova-3
 DEFAULT_PROCESSING_MODEL = "gemini-2.5-flash"     # For mode processing in transcript protocol
 DEFAULT_DIRECT_MODEL = "gemini-2.0-flash"         # For direct protocol
 
 # Model selection constraints
 MODEL_CONSTRAINTS = {
     # Which models can be used for transcription (audio input required)
-    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash", "gpt-4o-transcribe", "gpt-4o-openai"],
+    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash", "gpt-4o-transcribe", "gpt-4o-openai", "deepgram-nova3"],
     
     # Which models can be used for text processing (mode formatting)
     "text_processing": ["gemini-2.0-flash", "gemini-2.5-flash"],

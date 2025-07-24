@@ -1915,6 +1915,16 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
     Returns:
         The raw transcript text or None on error.
     """
+    # Check if using Deepgram Nova-3
+    if model_id == "deepgram-nova3":
+        from deepgram_utils import transcribe_nova3
+        text = await transcribe_nova3(audio_file_path, language)
+        if text:
+            return text
+        # falls through to GPT-4o OpenAI if None
+        logger.warning("Deepgram Nova-3 transcription failed, falling back to OpenAI")
+        model_id = "gpt-4o-openai"
+    
     # Check if using GPT-4o Transcribe via OpenAI
     if model_id == "gpt-4o-openai":
         from openai_utils import gpt4o_transcribe_openai
