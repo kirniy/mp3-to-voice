@@ -13,14 +13,14 @@ async def gpt4o_transcribe(path: str, lang: str = "ru",
         start_ts = time.time()
 
         # 1) create prediction (non‑blocking)
-        # Replicate needs to know the file extension
-        import os
-        filename = os.path.basename(path) or "audio.oga"
-        
+        # Upload file first, then use the URL
+        with open(path, "rb") as f:
+            file_url = replicate.files.create(f)
+            
         pred = replicate.predictions.create(
             model="openai/gpt-4o-transcribe",
             input={
-                "audio_file": (filename, open(path, "rb")),
+                "audio_file": file_url.urls["get"],
                 "language": lang,
                 "temperature": 0
             },

@@ -28,9 +28,12 @@ async def gpt4o_transcribe_openai(path: str, lang: str = "auto") -> str | None:
     """
     try:
         # OpenAI requires a filename with extension
+        # OpenAI doesn't recognize .oga, use .ogg instead
         filename = os.path.basename(path)
         if not filename:
-            filename = "audio.oga"
+            filename = "audio.ogg"
+        elif filename.endswith('.oga'):
+            filename = filename.replace('.oga', '.ogg')
         
         log.info(f"Attempting OpenAI transcription with file: {filename}")
             
