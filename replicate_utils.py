@@ -12,15 +12,11 @@ async def gpt4o_transcribe(path: str, lang: str = "ru",
     try:
         start_ts = time.time()
 
-        # Convert OGA to WAV for better compatibility
-        from audio_utils import to_wav
-        wav_path = await to_wav(path)
-        
         # 1) create prediction (non‑blocking)
         pred = replicate.predictions.create(
             model="openai/gpt-4o-transcribe",
             input={
-                "audio_file": open(wav_path, "rb"),
+                "audio_file": open(path, "rb"),
                 "language": lang,
                 "temperature": 0
             },
