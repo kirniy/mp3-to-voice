@@ -1,6 +1,7 @@
 import logging
 import asyncpg
 from datetime import datetime
+from model_config import DEFAULT_PROTOCOL, DEFAULT_TRANSCRIPTION_MODEL, DEFAULT_PROCESSING_MODEL, DEFAULT_DIRECT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,11 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                 CREATE TABLE IF NOT EXISTS user_preferences (
                     user_id BIGINT PRIMARY KEY,
                     language TEXT DEFAULT 'ru',
+                    protocol TEXT DEFAULT 'direct',
+                    direct_model TEXT DEFAULT 'gemini-2.0-flash',
+                    transcription_model TEXT DEFAULT 'gemini-2.5-flash',
+                    processing_model TEXT DEFAULT 'gemini-2.5-flash',
+                    thinking_budget_level TEXT DEFAULT 'medium',
                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
@@ -115,6 +121,32 @@ async def create_tables(pool: asyncpg.Pool) -> None:
                 logger.info("Added summary_diagram column to summaries table or verified it exists")
             except Exception as e:
                 logger.warning(f"Error adding summary_diagram column (likely already exists): {e}")
+                
+            # Add model configuration columns to user_preferences if they don't exist
+            try:
+                await connection.execute("""
+                    ALTER TABLE user_preferences 
+                    ADD COLUMN IF NOT EXISTS protocol TEXT DEFAULT 'direct';
+                """)
+                await connection.execute("""
+                    ALTER TABLE user_preferences 
+                    ADD COLUMN IF NOT EXISTS direct_model TEXT DEFAULT 'gemini-2.0-flash';
+                """)
+                await connection.execute("""
+                    ALTER TABLE user_preferences 
+                    ADD COLUMN IF NOT EXISTS transcription_model TEXT DEFAULT 'gemini-2.5-flash';
+                """)
+                await connection.execute("""
+                    ALTER TABLE user_preferences 
+                    ADD COLUMN IF NOT EXISTS processing_model TEXT DEFAULT 'gemini-2.5-flash';
+                """)
+                await connection.execute("""
+                    ALTER TABLE user_preferences 
+                    ADD COLUMN IF NOT EXISTS thinking_budget_level TEXT DEFAULT 'medium';
+                """)
+                logger.info("Added model configuration columns to user_preferences table")
+            except Exception as e:
+                logger.warning(f"Error adding model configuration columns (likely already exist): {e}")
 
             logger.info("Database tables created or verified")
             
@@ -427,4 +459,62 @@ async def get_all_chat_history(pool: asyncpg.Pool, chat_id: int) -> list[asyncpg
             return records
     except Exception as e:
         logger.error(f"Error fetching all history for export for chat {chat_id}: {e}", exc_info=True)
-        return [] 
+        return []
+
+async def get_user_model_preference(pool: asyncpg.Pool, user_id: int, preference_key: str) -> str:
+    """Get a specific model preference for a user."""
+    from model_config import (
+        DEFAULT_PROTOCOL, DEFAULT_DIRECT_MODEL, 
+        DEFAULT_TRANSCRIPTION_MODEL, DEFAULT_PROCESSING_MODEL
+    )
+    
+    # Default values
+    defaults = {
+        "protocol": DEFAULT_PROTOCOL,
+        "direct_model": DEFAULT_DIRECT_MODEL,
+        "transcription_model": DEFAULT_TRANSCRIPTION_MODEL,
+        "processing_model": DEFAULT_PROCESSING_MODEL,
+        "thinking_budget_level": "medium"
+    }
+    
+    if preference_key not in defaults:
+        logger.error(f"Unknown preference key: {preference_key}")
+        return None
+    
+    try:
+        async with pool.acquire() as connection:
+            # Get the preference value
+            value = await connection.fetchval(f"""
+                SELECT {preference_key} FROM user_preferences
+                WHERE user_id = $1;
+            """, user_id)
+            
+            # Return value or default
+            return value if value is not None else defaults[preference_key]
+    except Exception as e:
+        logger.error(f"Error getting model preference {preference_key} for user {user_id}: {e}", exc_info=True)
+        return defaults[preference_key]
+
+async def set_user_model_preference(pool: asyncpg.Pool, user_id: int, preference_key: str, value: str) -> bool:
+    """Set a specific model preference for a user."""
+    valid_keys = ["protocol", "direct_model", "transcription_model", "processing_model", "thinking_budget_level"]
+    
+    if preference_key not in valid_keys:
+        logger.error(f"Invalid preference key: {preference_key}")
+        return False
+    
+    try:
+        async with pool.acquire() as connection:
+            # Update or insert the preference
+            await connection.execute(f"""
+                INSERT INTO user_preferences (user_id, {preference_key})
+                VALUES ($1, $2)
+                ON CONFLICT (user_id) DO UPDATE
+                SET {preference_key} = $2;
+            """, user_id, value)
+            
+            logger.info(f"Updated {preference_key} to {value} for user {user_id}")
+            return True
+    except Exception as e:
+        logger.error(f"Error setting model preference {preference_key} for user {user_id}: {e}", exc_info=True)
+        return False 

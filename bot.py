@@ -19,7 +19,7 @@ from telegram import error as telegram_error # Added to fix NameError with teleg
 
 from pydub import AudioSegment
 from locales import get_dual_string, LANGUAGES, get_string
-from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, update_summary_diagram_and_message_id, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history # Added update_summary_diagram_and_message_id
+from db_utils import create_tables, save_summary, get_summary_context_for_callback, update_summary_mode_and_text, update_summary_diagram_and_message_id, get_user_history, get_chat_default_mode, set_chat_default_mode, get_user_language, set_user_language, get_chat_language, set_chat_language, get_chat_paused_status, delete_chat_history, get_all_chat_history, get_user_model_preference, set_user_model_preference # Added update_summary_diagram_and_message_id
 from gemini_utils import process_audio_with_gemini, DEFAULT_MODE, SUPPORTED_MODES, get_mode_name # Added get_mode_name
 from diagram_utils import generate_diagram_data, create_mermaid_syntax, render_mermaid_to_png
 
@@ -537,8 +537,24 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
             await file.download_to_drive(custom_path=temp_audio_file.name)
             logger.info(f"Re-downloaded audio {audio_file_id} for mode change to {new_mode}.")
             
+            # Get user's model preferences
+            protocol = await get_user_model_preference(pool, user_id, "protocol")
+            direct_model = await get_user_model_preference(pool, user_id, "direct_model")
+            transcription_model = await get_user_model_preference(pool, user_id, "transcription_model")
+            processing_model = await get_user_model_preference(pool, user_id, "processing_model")
+            thinking_budget_level = await get_user_model_preference(pool, user_id, "thinking_budget_level")
+            
             # Process audio with new mode
-            summary_text, transcript_text = await process_audio_with_gemini(temp_audio_file.name, new_mode, chat_lang)
+            summary_text, transcript_text = await process_audio_with_gemini(
+                temp_audio_file.name, 
+                new_mode, 
+                chat_lang,
+                protocol=protocol,
+                direct_model=direct_model,
+                transcription_model=transcription_model,
+                processing_model=processing_model,
+                thinking_budget_level=thinking_budget_level
+            )
         
         if transcript_text is None:
             logger.error(f"Failed to get transcript for mode change, aborting")
@@ -809,8 +825,24 @@ async def redo(update: Update, context: CallbackContext, original_msg_id: int):
             await file.download_to_drive(custom_path=temp_audio_file.name)
             logger.info(f"Re-downloaded audio {audio_file_id} for redo.")
             
+            # Get user's model preferences
+            protocol = await get_user_model_preference(pool, user_id, "protocol")
+            direct_model = await get_user_model_preference(pool, user_id, "direct_model")
+            transcription_model = await get_user_model_preference(pool, user_id, "transcription_model")
+            processing_model = await get_user_model_preference(pool, user_id, "processing_model")
+            thinking_budget_level = await get_user_model_preference(pool, user_id, "thinking_budget_level")
+            
             # Process audio with current mode
-            summary_text, transcript_text = await process_audio_with_gemini(temp_audio_file.name, current_mode, chat_lang)
+            summary_text, transcript_text = await process_audio_with_gemini(
+                temp_audio_file.name, 
+                current_mode, 
+                chat_lang,
+                protocol=protocol,
+                direct_model=direct_model,
+                transcription_model=transcription_model,
+                processing_model=processing_model,
+                thinking_budget_level=thinking_budget_level
+            )
         
         # Get chat's language if not already retrieved
         if 'chat_lang' not in locals():
@@ -1248,6 +1280,103 @@ async def show_settings_mode_menu(update: Update, context: CallbackContext):
             error_message = "Режим опцияларын көрсету кезінде қате"
         await query.answer(error_message, show_alert=True)
 
+async def show_model_settings_menu(update: Update, context: CallbackContext):
+    """Show the model settings menu."""
+    query = update.callback_query
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    pool = context.bot_data.get('db_pool')
+    
+    if not pool:
+        await query.answer("Database error", show_alert=True)
+        return
+    
+    # Get user preferences
+    user_prefs = await pool.fetchrow("""
+        SELECT protocol, direct_model, transcription_model, processing_model, thinking_budget_level 
+        FROM user_preferences WHERE user_id = $1
+    """, user_id)
+    
+    # Get current settings or defaults
+    current_protocol = user_prefs['protocol'] if user_prefs else 'direct'
+    current_direct_model = user_prefs['direct_model'] if user_prefs else 'gemini-2.0-flash'
+    current_transcription_model = user_prefs['transcription_model'] if user_prefs else 'gemini-2.5-flash'
+    current_processing_model = user_prefs['processing_model'] if user_prefs else 'gemini-2.5-flash'
+    current_thinking_level = user_prefs['thinking_budget_level'] if user_prefs else 'medium'
+    
+    # Get chat language
+    chat_lang = await get_chat_language(pool, chat_id)
+    
+    # Create menu
+    keyboard = []
+    
+    # Protocol selection
+    protocol_text = "протокол: прямой" if current_protocol == 'direct' else "протокол: транскрипт"
+    if chat_lang == 'en':
+        protocol_text = "protocol: direct" if current_protocol == 'direct' else "protocol: transcript"
+    elif chat_lang == 'kk':
+        protocol_text = "протокол: тікелей" if current_protocol == 'direct' else "протокол: транскрипт"
+    
+    keyboard.append([InlineKeyboardButton(protocol_text, callback_data="toggle_protocol")])
+    
+    if current_protocol == 'direct':
+        # Show direct model selection
+        direct_model_text = f"модель: {current_direct_model}"
+        if chat_lang == 'en':
+            direct_model_text = f"model: {current_direct_model}"
+        elif chat_lang == 'kk':
+            direct_model_text = f"модель: {current_direct_model}"
+        keyboard.append([InlineKeyboardButton(direct_model_text, callback_data="select_direct_model")])
+    else:
+        # Show transcript protocol models
+        trans_model_text = f"транскрипция: {current_transcription_model}"
+        proc_model_text = f"обработка: {current_processing_model}"
+        if chat_lang == 'en':
+            trans_model_text = f"transcription: {current_transcription_model}"
+            proc_model_text = f"processing: {current_processing_model}"
+        elif chat_lang == 'kk':
+            trans_model_text = f"транскрипция: {current_transcription_model}"
+            proc_model_text = f"өңдеу: {current_processing_model}"
+        keyboard.append([InlineKeyboardButton(trans_model_text, callback_data="select_transcription_model")])
+        keyboard.append([InlineKeyboardButton(proc_model_text, callback_data="select_processing_model")])
+    
+    # Thinking budget level (only for 2.5 Flash)
+    if (current_protocol == 'direct' and current_direct_model == 'gemini-2.5-flash') or \
+       (current_protocol == 'transcript' and (current_transcription_model == 'gemini-2.5-flash' or current_processing_model == 'gemini-2.5-flash')):
+        thinking_text = f"мышление: {current_thinking_level}"
+        if chat_lang == 'en':
+            thinking_text = f"thinking: {current_thinking_level}"
+        elif chat_lang == 'kk':
+            thinking_text = f"ойлау: {current_thinking_level}"
+        keyboard.append([InlineKeyboardButton(thinking_text, callback_data="select_thinking_level")])
+    
+    # Back button
+    back_text = "← назад"
+    if chat_lang == 'en':
+        back_text = "← back"
+    elif chat_lang == 'kk':
+        back_text = "← артқа"
+    keyboard.append([InlineKeyboardButton(back_text, callback_data="settings")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Title
+    title = "настройки модели"
+    if chat_lang == 'en':
+        title = "model settings"
+    elif chat_lang == 'kk':
+        title = "модель параметрлері"
+    
+    try:
+        await query.edit_message_reply_markup(reply_markup=reply_markup)
+        try:
+            await query.edit_message_text(title, reply_markup=reply_markup)
+        except telegram_error.BadRequest:
+            logger.debug("Could not update message text for model settings menu")
+    except Exception as e:
+        logger.error(f"Error showing model settings menu: {e}", exc_info=True)
+        await query.answer("Error showing model settings", show_alert=True)
+
 # --- Text Command Handler ---
 
 async def handle_text_commands(update: Update, context: CallbackContext) -> None:
@@ -1342,6 +1471,7 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
     # Localize menu options
     lang_btn_text = "выбор языка"
     mode_btn_text = "выбор режима"
+    model_btn_text = "выбор модели"
     history_btn_text = "история"
     sub_btn_text = "информация о подписке"
     help_btn_text = "помощь"
@@ -1350,6 +1480,7 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
     if chat_lang == 'en':
         lang_btn_text = "language selection"
         mode_btn_text = "mode selection"
+        model_btn_text = "model selection"
         history_btn_text = "history"
         sub_btn_text = "subscription info"
         help_btn_text = "help"
@@ -1357,6 +1488,7 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
     elif chat_lang == 'kk':
         lang_btn_text = "тіл таңдау"
         mode_btn_text = "режим таңдау"
+        model_btn_text = "модель таңдау"
         history_btn_text = "тарих"
         sub_btn_text = "жазылым туралы ақпарат"
         help_btn_text = "көмек"
@@ -1366,6 +1498,7 @@ async def settings_command(update: Update, context: CallbackContext) -> None:
     keyboard = [
         [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
         [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
+        [InlineKeyboardButton(model_btn_text, callback_data="model_settings_menu")],
         [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
         [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
         [InlineKeyboardButton(help_btn_text, callback_data="help")],
@@ -1594,8 +1727,24 @@ async def handle_voice_message(update: Update, context: CallbackContext) -> None
         # 2. Get chat's default mode or use system default
         mode = await get_chat_default_mode(pool, message.chat_id, DEFAULT_MODE)
         
-        # 3. Pass chat language to Gemini for processing in the correct language
-        summary_text, transcript_text = await process_audio_with_gemini(temp_audio_file.name, mode, chat_lang)
+        # 3. Get user's model preferences
+        protocol = await get_user_model_preference(pool, user.id, "protocol")
+        direct_model = await get_user_model_preference(pool, user.id, "direct_model")
+        transcription_model = await get_user_model_preference(pool, user.id, "transcription_model")
+        processing_model = await get_user_model_preference(pool, user.id, "processing_model")
+        thinking_budget_level = await get_user_model_preference(pool, user.id, "thinking_budget_level")
+        
+        # 4. Pass chat language and model preferences to Gemini for processing
+        summary_text, transcript_text = await process_audio_with_gemini(
+            temp_audio_file.name, 
+            mode, 
+            chat_lang,
+            protocol=protocol,
+            direct_model=direct_model,
+            transcription_model=transcription_model,
+            processing_model=processing_model,
+            thinking_budget_level=thinking_budget_level
+        )
 
     # 3. Handle Gemini Response
     if transcript_text is None: # Indicates a processing error in Gemini
@@ -1942,6 +2091,7 @@ async def button_callback(update: Update, context: CallbackContext):
         # Localize menu options
         lang_btn_text = "выбор языка"
         mode_btn_text = "выбор режима"
+        model_btn_text = "выбор модели"
         history_btn_text = "история"
         sub_btn_text = "информация о подписке"
         help_btn_text = "помощь"
@@ -1951,6 +2101,7 @@ async def button_callback(update: Update, context: CallbackContext):
         if chat_lang == 'en':
             lang_btn_text = "language selection"
             mode_btn_text = "mode selection"
+            model_btn_text = "model selection"
             history_btn_text = "history"
             sub_btn_text = "subscription info"
             help_btn_text = "help"
@@ -1959,6 +2110,7 @@ async def button_callback(update: Update, context: CallbackContext):
         elif chat_lang == 'kk':
             lang_btn_text = "тіл таңдау"
             mode_btn_text = "режим таңдау"
+            model_btn_text = "модель таңдау"
             history_btn_text = "тарих"
             sub_btn_text = "жазылым туралы ақпарат"
             help_btn_text = "көмек"
@@ -1968,6 +2120,7 @@ async def button_callback(update: Update, context: CallbackContext):
         keyboard = [
             [InlineKeyboardButton(lang_btn_text, callback_data="language_menu")],
             [InlineKeyboardButton(mode_btn_text, callback_data="settings_mode_menu")],
+            [InlineKeyboardButton(model_btn_text, callback_data="model_settings_menu")],
             [InlineKeyboardButton(history_btn_text, callback_data="show_command_history:0")],
             [InlineKeyboardButton(sub_btn_text, callback_data="subscription_info")],
             [InlineKeyboardButton(help_btn_text, callback_data="help")],
@@ -2254,6 +2407,182 @@ async def button_callback(update: Update, context: CallbackContext):
                 error_message = "Әдепкі режимді орнату сәтсіз аяқталды"
             
             await query.answer(error_message, show_alert=True)
+        return
+    
+    # --- Model Settings Handlers ---
+    elif action == "model_settings_menu":
+        await show_model_settings_menu(update, context)
+        return
+    
+    elif action == "toggle_protocol":
+        # Toggle between direct and transcript protocols
+        current_protocol = await get_user_model_preference(pool, user_id, "protocol")
+        if current_protocol == "direct":
+            new_protocol = "transcript"
+        else:
+            new_protocol = "direct"
+        
+        success = await set_user_model_preference(pool, user_id, "protocol", new_protocol)
+        if success:
+            await query.answer(f"Protocol switched to {new_protocol}")
+            await show_model_settings_menu(update, context)
+        else:
+            await query.answer("Failed to update protocol", show_alert=True)
+        return
+    
+    elif action == "select_direct_model":
+        # Show model selection for direct protocol
+        from model_config import MODELS, MODEL_CONSTRAINTS
+        
+        keyboard = []
+        current_model = await get_user_model_preference(pool, user_id, "direct_model")
+        
+        for model_id in MODEL_CONSTRAINTS["direct_audio"]:
+            model_info = MODELS.get(model_id, {})
+            model_name = model_info.get("name", model_id)
+            
+            # Add checkmark if this is the current model
+            if model_id == current_model:
+                model_name = f"✓ {model_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                model_name,
+                callback_data=f"set_direct_model:{model_id}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("← Back", callback_data="model_settings_menu")])
+        
+        await query.edit_message_text(
+            text="Select model for direct protocol:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    elif action == "select_transcription_model":
+        # Show model selection for transcription in transcript protocol
+        from model_config import MODELS, MODEL_CONSTRAINTS
+        
+        keyboard = []
+        current_model = await get_user_model_preference(pool, user_id, "transcription_model")
+        
+        for model_id in MODEL_CONSTRAINTS["transcription"]:
+            model_info = MODELS.get(model_id, {})
+            model_name = model_info.get("name", model_id)
+            
+            # Add checkmark if this is the current model
+            if model_id == current_model:
+                model_name = f"✓ {model_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                model_name,
+                callback_data=f"set_transcription_model:{model_id}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("← Back", callback_data="model_settings_menu")])
+        
+        await query.edit_message_text(
+            text="Select transcription model:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    elif action == "select_processing_model":
+        # Show model selection for processing in transcript protocol
+        from model_config import MODELS, MODEL_CONSTRAINTS
+        
+        keyboard = []
+        current_model = await get_user_model_preference(pool, user_id, "processing_model")
+        
+        for model_id in MODEL_CONSTRAINTS["text_processing"]:
+            model_info = MODELS.get(model_id, {})
+            model_name = model_info.get("name", model_id)
+            
+            # Add checkmark if this is the current model
+            if model_id == current_model:
+                model_name = f"✓ {model_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                model_name,
+                callback_data=f"set_processing_model:{model_id}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("← Back", callback_data="model_settings_menu")])
+        
+        await query.edit_message_text(
+            text="Select processing model:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    elif action == "select_thinking_level":
+        # Show thinking budget options
+        keyboard = []
+        current_level = await get_user_model_preference(pool, user_id, "thinking_budget_level")
+        
+        thinking_levels = [
+            ("off", "Off"),
+            ("low", "Low (512 tokens)"),
+            ("medium", "Medium (1024 tokens)"),
+            ("high", "High (2048 tokens)"),
+            ("dynamic", "Dynamic (automatic)")
+        ]
+        
+        for level_id, level_name in thinking_levels:
+            # Add checkmark if this is the current level
+            if level_id == current_level:
+                level_name = f"✓ {level_name}"
+            
+            keyboard.append([InlineKeyboardButton(
+                level_name,
+                callback_data=f"set_thinking_level:{level_id}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("← Back", callback_data="model_settings_menu")])
+        
+        await query.edit_message_text(
+            text="Select thinking budget level:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    elif action.startswith("set_direct_model:"):
+        model_id = action.replace("set_direct_model:", "")
+        success = await set_user_model_preference(pool, user_id, "direct_model", model_id)
+        if success:
+            await query.answer(f"Direct model set to {model_id}")
+            await show_model_settings_menu(update, context)
+        else:
+            await query.answer("Failed to update model", show_alert=True)
+        return
+    
+    elif action.startswith("set_transcription_model:"):
+        model_id = action.replace("set_transcription_model:", "")
+        success = await set_user_model_preference(pool, user_id, "transcription_model", model_id)
+        if success:
+            await query.answer(f"Transcription model set to {model_id}")
+            await show_model_settings_menu(update, context)
+        else:
+            await query.answer("Failed to update model", show_alert=True)
+        return
+    
+    elif action.startswith("set_processing_model:"):
+        model_id = action.replace("set_processing_model:", "")
+        success = await set_user_model_preference(pool, user_id, "processing_model", model_id)
+        if success:
+            await query.answer(f"Processing model set to {model_id}")
+            await show_model_settings_menu(update, context)
+        else:
+            await query.answer("Failed to update model", show_alert=True)
+        return
+    
+    elif action.startswith("set_thinking_level:"):
+        level = action.replace("set_thinking_level:", "")
+        success = await set_user_model_preference(pool, user_id, "thinking_budget_level", level)
+        if success:
+            await query.answer(f"Thinking budget set to {level}")
+            await show_model_settings_menu(update, context)
+        else:
+            await query.answer("Failed to update thinking level", show_alert=True)
         return
     
     # --- History Action Handlers ---

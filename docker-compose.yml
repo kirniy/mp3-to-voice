@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - TZ=${TZ:-UTC}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=mp3tovoice
+      - POSTGRES_PASSWORD=localpassword
+      - POSTGRES_DB=mp3tovoice
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

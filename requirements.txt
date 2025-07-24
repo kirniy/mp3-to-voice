@@ -5,4 +5,5 @@ google-generativeai
 asyncpg
 pytz
 ffmpeg-python # Optional, but recommended for broader format support
-Pillow # For fallback image generation 
+Pillow # For fallback image generation
+replicate # For GPT-4o Transcribe integration 

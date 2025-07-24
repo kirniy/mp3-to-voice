@@ -1,0 +1,1 @@
+add TTS for summarizing the voice message. as an extra feature. use some nice TTS engine, not outdated shit. 
