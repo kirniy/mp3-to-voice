@@ -18,7 +18,6 @@ async def gpt4o_transcribe(path: str, lang: str = "ru") -> str | None:
                     "response_format": "text",
                     "temperature": 0
                 },
-                stream=False,          # MUST be False for local files
                 wait=True,             # block until status=="succeeded"
                 use_file_output=False
             )

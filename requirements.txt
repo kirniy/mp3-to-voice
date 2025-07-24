@@ -6,5 +6,5 @@ asyncpg
 pytz
 ffmpeg-python # Optional, but recommended for broader format support
 Pillow # For fallback image generation
-replicate>=1.1.0 # For GPT-4o Transcribe integration via Replicate - supports stream=False parameter
+replicate>=1.0.3 # For GPT-4o Transcribe integration via Replicate
 aiofiles # For async file operations 
