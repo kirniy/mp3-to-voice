@@ -526,35 +526,62 @@ async def mode_set(update: Update, context: CallbackContext, data_parts: list, o
         audio_file_id = db_record['telegram_audio_file_id']
         current_mode = db_record['mode']
         user_id = db_record['user_id']
+        stored_transcript = db_record.get('transcript_text')
         
         # Get user info for the header
         original_user = await context.bot.get_chat(user_id)
         original_message_date = query.message.date
         
-        # Re-download the audio file
-        with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
-            file = await context.bot.get_file(audio_file_id)
-            await file.download_to_drive(custom_path=temp_audio_file.name)
-            logger.info(f"Re-downloaded audio {audio_file_id} for mode change to {new_mode}.")
+        # Get user's model preferences
+        protocol = await get_user_model_preference(pool, user_id, "protocol")
+        processing_model = await get_user_model_preference(pool, user_id, "processing_model")
+        thinking_budget_level = await get_user_model_preference(pool, user_id, "thinking_budget_level")
+        
+        # Check if we can use cached transcript for transcript protocol
+        if protocol == "transcript" and stored_transcript and new_mode != 'diagram':
+            # Use cached transcript to avoid re-transcribing
+            logger.info(f"Using cached transcript for mode change to {new_mode}")
+            from gemini_utils import process_transcript_with_mode
             
-            # Get user's model preferences
-            protocol = await get_user_model_preference(pool, user_id, "protocol")
-            direct_model = await get_user_model_preference(pool, user_id, "direct_model")
-            transcription_model = await get_user_model_preference(pool, user_id, "transcription_model")
-            processing_model = await get_user_model_preference(pool, user_id, "processing_model")
-            thinking_budget_level = await get_user_model_preference(pool, user_id, "thinking_budget_level")
-            
-            # Process audio with new mode
-            summary_text, transcript_text = await process_audio_with_gemini(
-                temp_audio_file.name, 
-                new_mode, 
+            summary_text = await process_transcript_with_mode(
+                stored_transcript,
+                new_mode,
                 chat_lang,
-                protocol=protocol,
-                direct_model=direct_model,
-                transcription_model=transcription_model,
-                processing_model=processing_model,
+                processing_model_id=processing_model,
                 thinking_budget_level=thinking_budget_level
             )
+            transcript_text = stored_transcript
+            
+            if summary_text is None and new_mode != 'transcript':
+                logger.error(f"Failed to process cached transcript for mode {new_mode}")
+                await query.edit_message_text(
+                    "Error processing transcript. Please try again.\n\n"
+                    "Ошибка при обработке транскрипта. Пожалуйста, попробуйте снова.",
+                    reply_markup=create_action_buttons(original_msg_id, chat_lang)
+                )
+                return
+        else:
+            # Re-download and process audio (for direct protocol or if no transcript cached)
+            with tempfile.NamedTemporaryFile(suffix=".oga") as temp_audio_file:
+                file = await context.bot.get_file(audio_file_id)
+                await file.download_to_drive(custom_path=temp_audio_file.name)
+                logger.info(f"Re-downloaded audio {audio_file_id} for mode change to {new_mode}.")
+                
+                # Get all model preferences for full processing
+                direct_model = await get_user_model_preference(pool, user_id, "direct_model")
+                transcription_model = await get_user_model_preference(pool, user_id, "transcription_model")
+                
+                # Process audio with new mode
+                summary_text, transcript_text = await process_audio_with_gemini(
+                    temp_audio_file.name, 
+                    new_mode, 
+                    chat_lang,
+                    protocol=protocol,
+                    direct_model=direct_model,
+                    transcription_model=transcription_model,
+                    processing_model=processing_model,
+                    thinking_budget_level=thinking_budget_level
+                )
         
         if transcript_text is None:
             logger.error(f"Failed to get transcript for mode change, aborting")
@@ -2853,23 +2880,19 @@ async def button_callback(update: Update, context: CallbackContext):
                 escaped_display_text = escape_markdown_preserve_formatting(display_text)
                 final_text = f"{header}\n\n{escaped_display_text}"
                 
-                # First, try to update only the reply markup - works for all message types
-                await query.edit_message_reply_markup(
-                    reply_markup=create_action_buttons(original_msg_id, chat_lang)
-                )
-                
-                # Then, if it's a text message, try to update the text content
-                # This is in a separate try-except since it will fail for photo/voice messages 
-                try:
+                # Check if it's a text message or photo message
+                if query.message.text:
+                    # For text messages, update both text and markup in one call
                     await query.edit_message_text(
                         final_text,
                         reply_markup=create_action_buttons(original_msg_id, chat_lang),
                         parse_mode=ParseMode.MARKDOWN_V2
                     )
-                except telegram_error.BadRequest as text_error:
-                    # If editing text fails, just log it - we already updated the markup
-                    logger.debug(f"Could not update message text for back_to_message (likely not a text message): {text_error}")
-                    # Continue normally - we already updated the reply markup successfully
+                else:
+                    # For photo/diagram messages, only update the reply markup
+                    await query.edit_message_reply_markup(
+                        reply_markup=create_action_buttons(original_msg_id, chat_lang)
+                    )
                 
             except Exception as e:
                 logger.error(f"Error returning to message {original_msg_id}: {e}", exc_info=True)

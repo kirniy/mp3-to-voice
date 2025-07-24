@@ -1827,6 +1827,88 @@ Start immediately with the first word of the recording.
     return summary_text, raw_transcript
 
 
+async def process_transcript_with_mode(
+    transcript_text: str,
+    mode: str,
+    language: str = 'ru',
+    processing_model_id: str = DEFAULT_PROCESSING_MODEL,
+    thinking_budget_level: str = 'medium'
+) -> str | None:
+    """Process an existing transcript with a specific mode without re-transcribing.
+    
+    Args:
+        transcript_text: The already transcribed text.
+        mode: The desired processing mode (e.g., 'brief', 'detailed').
+        language: The language for the summary output ('en', 'ru', 'kk').
+        processing_model_id: The Gemini model to use for mode processing.
+        thinking_budget_level: Thinking budget level for models that support it.
+    
+    Returns:
+        The processed summary text or None on error.
+    """
+    if not transcript_text:
+        logger.error("No transcript text provided")
+        return None
+    
+    # Special handling for transcript mode - just return the transcript
+    if mode == 'transcript':
+        return transcript_text
+    
+    # Special handling for diagram mode - return None (diagram needs special handling)
+    if mode == 'diagram':
+        return None
+    
+    # Get model configuration
+    model_config = get_model_config(processing_model_id)
+    if not model_config:
+        logger.error(f"Invalid processing model ID: {processing_model_id}")
+        return None
+    
+    # Configure model with thinking budget if supported
+    if model_config.get("supports_thinking"):
+        thinking_budget = get_thinking_budget(processing_model_id, thinking_budget_level)
+        logger.info(f"Using {model_config['name']} with thinking budget: {thinking_budget}")
+        
+        generation_config = {
+            "temperature": 0.0
+        }
+        model = genai.GenerativeModel(
+            model_name=model_config["model_name"],
+            generation_config=generation_config
+        )
+    else:
+        logger.info(f"Using {model_config['name']} (no thinking support)")
+        model = genai.GenerativeModel(model_name=model_config["model_name"])
+    
+    # Get mode prompts from imported module
+    mode_prompts = get_mode_prompts()
+    
+    # Get the appropriate prompt
+    prompt_map = {
+        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+    }
+    
+    summary_prompt = prompt_map.get(mode)
+    if not summary_prompt:
+        logger.error(f"Internal error: No prompt found for mode {mode}")
+        return None
+    
+    # Process the transcript
+    logger.debug(f"Processing existing transcript with {mode} mode in {language}...")
+    try:
+        summary_response = await model.generate_content_async([summary_prompt, transcript_text])
+        summary_text = summary_response.text
+        logger.info(f"{mode.capitalize()} summary generated from cached transcript in {language}.")
+        return summary_text
+    except Exception as e:
+        logger.error(f"Error processing transcript with mode: {e}", exc_info=True)
+        return None
+
+
 async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: str, thinking_budget_level: str) -> str | None:
     """Helper function to only transcribe audio without any processing.
     
