@@ -1479,16 +1479,22 @@ Is this how you'd tell the story at a bar?
                         transcript_text = original_transcript
                         logger.info(f"Transcript extracted for diagram mode in {language}.")
                     else:
-                        summary_prompt = prompt_map.get(mode)
-                        if not summary_prompt:
-                             logger.error(f"Internal error: No prompt found for mode {mode}")
-                             return None, None
+                        # Special handling for as_is mode - just return the transcript
+                        if mode == "as_is":
+                            summary_text = None
+                            transcript_text = original_transcript
+                            logger.info(f"Transcript returned as-is for {language}.")
+                        else:
+                            summary_prompt = prompt_map.get(mode)
+                            if not summary_prompt:
+                                 logger.error(f"Internal error: No prompt found for mode {mode}")
+                                 return None, None
 
-                        logger.debug(f"Requesting {mode} summary in {language}...")
-                        summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
-                        summary_text = summary_response.text
-                        transcript_text = original_transcript
-                        logger.info(f"{mode.capitalize()} summary generated in {language}.")
+                            logger.debug(f"Requesting {mode} summary in {language}...")
+                            summary_response = await model.generate_content_async([summary_prompt, raw_transcript])
+                            summary_text = summary_response.text
+                            transcript_text = original_transcript
+                            logger.info(f"{mode.capitalize()} summary generated in {language}.")
 
                 # --- Cleanup ---
                 # Delete the uploaded file from Gemini (important for managing storage/costs)
@@ -1805,6 +1811,11 @@ Start immediately with the first word of the recording.
         return None, raw_transcript
     
     # Get the appropriate prompt
+    # Special handling for as_is mode - just return the transcript
+    if mode == "as_is":
+        logger.info(f"Returning transcript as-is for {language}.")
+        return None, raw_transcript
+    
     prompt_map = {
         "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
         "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
@@ -1884,6 +1895,11 @@ async def process_transcript_with_mode(
     mode_prompts = get_mode_prompts()
     
     # Get the appropriate prompt
+    # Special handling for as_is mode - just return the transcript
+    if mode == "as_is":
+        logger.info(f"Returning transcript as-is for {language}.")
+        return transcript_text
+    
     prompt_map = {
         "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
         "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),

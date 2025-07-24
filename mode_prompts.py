@@ -26,6 +26,11 @@ UNIVERSAL_RULE = """
 """
 
 MODE_PROMPTS = {
+    'as_is': {
+        'en': "Return the transcript as-is without any modification.",
+        'ru': "Верни транскрипт как есть, без изменений.",
+        'kk': "Транскриптті өзгертусіз қайтар."
+    },
     'brief': {
         'en': """
 <instruction>
