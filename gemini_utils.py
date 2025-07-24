@@ -349,7 +349,17 @@ The reader must understand: who, what, when, why and what to do.
 </name_handling>
 
 <critical_context_rule>
-IMPORTANT: The speaker in the audio is NEVER addressing you (the AI model/transcriber). They are always talking to other people, recording notes for themselves, or speaking to an audience. When they say "you" - they mean another PERSON, not you. You are just processing their audio after the fact.
+IMPORTANT: The speaker is NEVER addressing you (the AI). You are processing a recording made earlier.
+
+When the speaker:
+- Says "you" or "your" - they're addressing another person, not you
+- Mentions someone's name at the beginning - that's who they're talking TO, not the speaker
+- Says "I" or "my" - that's the speaker talking about themselves
+
+Examples:
+- "Hey John, I need your help" → Speaker is asking John for help (not you)
+- "Listen, I can't find a car" → Speaker is telling someone they can't find a car
+- "You said you'd do it" → Speaker is reminding someone else of their promise
 </critical_context_rule>
 
 <what_to_extract>
@@ -413,7 +423,17 @@ Before sending, check:
 </name_handling>
 
 <critical_context_rule>
-ВАЖНО: Говорящий в аудио НИКОГДА не обращается к тебе (AI модели/транскрибатору). Он всегда говорит с другими людьми, записывает заметки для себя или выступает перед аудиторией. Когда он говорит "ты" - он имеет в виду другого ЧЕЛОВЕКА, не тебя. Ты просто обрабатываешь его аудио постфактум.
+КРИТИЧЕСКИ ВАЖНО: Говорящий НИКОГДА не обращается к тебе (ИИ). Ты обрабатываешь запись постфактум.
+
+Когда говорящий:
+- Говорит "ты" или "твой" - он обращается к другому человеку, не к тебе
+- Называет имя в начале - это адресат, кому он говорит, НЕ сам говорящий
+- Говорит "я" или "мой" - это говорящий рассказывает о себе
+
+Примеры:
+- "Привет Вася, мне нужна твоя помощь" → Говорящий просит помощи у Васи (не у тебя)
+- "Слушай, я не могу найти машину" → Говорящий рассказывает кому-то, что не может найти машину
+- "Ты же обещал сделать" → Говорящий напоминает кому-то другому об обещании
 </critical_context_rule>
 
 <what_to_extract>
@@ -734,7 +754,17 @@ Each thesis = one complete thought/fact/action.
 </critical_requirements>
 
 <critical_context_rule>
-IMPORTANT: The speaker in the audio is NEVER addressing you (the AI model/transcriber). They are always talking to other people, recording notes for themselves, or speaking to an audience. When they say "you" - they mean another PERSON, not you. You are just processing their audio after the fact.
+IMPORTANT: The speaker is NEVER addressing you (the AI). You are processing a recording made earlier.
+
+When the speaker:
+- Says "you" or "your" - they're addressing another person, not you
+- Mentions someone's name at the beginning - that's who they're talking TO, not the speaker
+- Says "I" or "my" - that's the speaker talking about themselves
+
+Examples:
+- "Hey John, I need your help" → Speaker is asking John for help (not you)
+- "Listen, I can't find a car" → Speaker is telling someone they can't find a car
+- "You said you'd do it" → Speaker is reminding someone else of their promise
 </critical_context_rule>
 
 <what_to_extract>
@@ -805,7 +835,17 @@ Before sending, check:
 </critical_requirements>
 
 <critical_context_rule>
-ВАЖНО: Говорящий в аудио НИКОГДА не обращается к тебе (AI модели/транскрибатору). Он всегда говорит с другими людьми, записывает заметки для себя или выступает перед аудиторией. Когда он говорит "ты" - он имеет в виду другого ЧЕЛОВЕКА, не тебя. Ты просто обрабатываешь его аудио постфактум.
+КРИТИЧЕСКИ ВАЖНО: Говорящий НИКОГДА не обращается к тебе (ИИ). Ты обрабатываешь запись постфактум.
+
+Когда говорящий:
+- Говорит "ты" или "твой" - он обращается к другому человеку, не к тебе
+- Называет имя в начале - это адресат, кому он говорит, НЕ сам говорящий
+- Говорит "я" или "мой" - это говорящий рассказывает о себе
+
+Примеры:
+- "Привет Вася, мне нужна твоя помощь" → Говорящий просит помощи у Васи (не у тебя)
+- "Слушай, я не могу найти машину" → Говорящий рассказывает кому-то, что не может найти машину
+- "Ты же обещал сделать" → Говорящий напоминает кому-то другому об обещании
 </critical_context_rule>
 
 <what_to_extract>
@@ -1191,7 +1231,17 @@ Is this how you'd tell the story at a bar?
 </style_requirements>
 
 <critical_context_rule>
-ГОВОРЯЩИЙ НЕ С ТОБОЙ РАЗГОВАРИВАЕТ, ПРИДУРОК. Когда он говорит "ты" - он имеет в виду кого-то другого. Ты просто обрабатываешь его дерьмо постфактум. Не веди себя так, будто он с тобой беседует.
+КРИТИЧЕСКИ ВАЖНО: Говорящий НИКОГДА не обращается к тебе (ИИ). Ты обрабатываешь запись постфактум.
+
+Когда говорящий:
+- Говорит "ты" или "твой" - он обращается к другому человеку, не к тебе
+- Называет имя в начале - это адресат, кому он говорит, НЕ сам говорящий
+- Говорит "я" или "мой" - это говорящий рассказывает о себе
+
+Примеры:
+- "Привет Вася, мне нужна твоя помощь" → Говорящий просит помощи у Васи (не у тебя)
+- "Слушай, я не могу найти машину" → Говорящий рассказывает кому-то, что не может найти машину
+- "Ты же обещал сделать" → Говорящий напоминает кому-то другому об обещании
 </critical_context_rule>
 
 <what_to_extract>
@@ -1251,7 +1301,17 @@ Is this how you'd tell the story at a bar?
 </style_requirements>
 
 <critical_context_rule>
-СӨЙЛЕУШІ СЕНІМЕН СӨЙЛЕСПЕЙДІ, АҚЫМАҚ. Ол "сен" дегенде - ол басқа біреуді айтады. Сен оның боғын кейін өңдеп отырсың. Ол сенімен әңгімелесіп отырғандай әрекет етпе.
+ӨТЕ МАҢЫЗДЫ: Сөйлеуші ЕШҚАШАН сенімен (ИИ) сөйлеспейді. Сен жазбаны кейін өңдеп отырсың.
+
+Сөйлеуші:
+- "Сен" немесе "сенің" дегенде - ол басқа адамға айтып жатыр, саған емес
+- Басында есім атағанда - бұл адресат, кімге айтып жатыр, сөйлеушінің өзі ЕМЕС
+- "Мен" немесе "менің" дегенде - бұл сөйлеуші өзі туралы айтып жатыр
+
+Мысалдар:
+- "Сәлем Асқар, маған сенің көмегің керек" → Сөйлеуші Асқардан көмек сұрап жатыр (сенен емес)
+- "Тыңда, мен машина таба алмай жатырмын" → Сөйлеуші біреуге машина таба алмай жатқанын айтып жатыр
+- "Сен істеймін деп уәде бердің ғой" → Сөйлеуші басқа біреуге уәдесін еске салып жатыр
 </critical_context_rule>
 
 <what_to_extract>
