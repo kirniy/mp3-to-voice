@@ -488,17 +488,17 @@ ONLY things with consequences:
 </what_to_ignore>
 
 <output_format>
-main topic
+[Main topic]:
 
 [One sentence - what the whole conversation is about. No period at the end]
 
-key points
+[Key points]:
 
 • [Fact/action/decision - extremely specific]
 • [Next key point with names]
 • [Only what's really important to remember]
 
-conclusion
+[Conclusion]:
 
 [1-2 sentences: what was ultimately decided/concluded. If nothing - write: "no specific decisions made"]
 </output_format>
@@ -593,11 +593,11 @@ Before sending, check:
 </what_to_ignore>
 
 <output_format>
-основная тема
+[Основная тема]:
 
 [Одно предложение - о чем весь разговор. Без точки в конце]
 
-тезисы
+[Тезисы]:
 
 • [Факт/действие/решение - предельно конкретно]
 • [Следующий ключевой момент с именами]
@@ -612,7 +612,7 @@ Before sending, check:
 ПРАВИЛЬНО: • Говорящий написал помощнику адресата
 НЕПРАВИЛЬНО: • Говорящий написал [имени]
 
-вывод
+[Вывод]:
 
 [1-2 предложения: что в итоге решили/к чему пришли. Если ни к чему - так и пиши: "конкретных решений не принято"]
 </output_format>
@@ -669,17 +669,17 @@ Before sending, check:
 </what_to_ignore>
 
 <output_format>
-негізгі тақырып
+[Негізгі тақырып]:
 
 [Бір сөйлем - бүкіл әңгіме не туралы. Соңында нүкте жоқ]
 
-тезистер
+[Тезистер]:
 
 • [Факт/әрекет/шешім - өте нақты]
 • [Есімдерімен келесі негізгі сәт]
 • [Тек есте сақтау керек нәрселер]
 
-қорытынды
+[Қорытынды]:
 
 [1-2 сөйлем: ақырында не шештік/неге келдік. Егер ешнәрсе болмаса - солай жазыңыз: "нақты шешімдер қабылданбады"]
 </output_format>
@@ -726,21 +726,21 @@ Details are for context and nuances.
 </handling_mixed_content>
 
 <output_format>
-main topic
+[Main topic]:
 
 [Concise: "emergency meeting on key supplier delivery failure"]
 
-key theses
+[Key theses]:
 
 • [Main decision/fact - self-sufficient]
 • [Second key point - understandable without context]
 • [Only 3-5 theses total]
 
-detailed disclosure
+[Detailed disclosure]:
 
 [Here expand each thesis with full context. Show the path to decisions, alternative options, risks. Details that are important but didn't make it to theses. Who said what, in what sequence, with what arguments.]
 
-final conclusion
+[Final conclusion]:
 
 [What to do now, who's responsible, what are the deadlines. Specific and actionable.]
 </output_format>
@@ -787,21 +787,21 @@ Good summary:
 </handling_mixed_content>
 
 <output_format>
-основная тема
+[Основная тема]:
 
 [Емко: "экстренное совещание по срыву поставок ключевого поставщика"]
 
-ключевые тезисы
+[Ключевые тезисы]:
 
 • [Главное решение/факт - самодостаточно]
 • [Второй ключевой момент - понятно без контекста]
 • [Всего 3-5 тезисов]
 
-подробное раскрытие
+[Подробное раскрытие]:
 
 [Здесь разверни каждый тезис с полным контекстом. Покажи путь к решениям, альтернативные варианты, риски. Детали, которые важны, но не попали в тезисы. Кто что говорил, в какой последовательности, с какими аргументами.]
 
-итоговый вывод
+[Итоговый вывод]:
 
 [Что делать сейчас, кто ответственный, какие сроки. Конкретно и применимо.]
 </output_format>
@@ -848,21 +848,21 @@ Good summary:
 </handling_mixed_content>
 
 <output_format>
-негізгі тақырып
+[Негізгі тақырып]:
 
 [Қысқа: "негізгі жеткізушінің жеткізу сәтсіздігі бойынша шұғыл жиналыс"]
 
-негізгі тезистер
+[Негізгі тезистер]:
 
 • [Басты шешім/факт - өзін-өзі қамтамасыз етеді]
 • [Екінші негізгі сәт - контекстсіз түсінікті]
 • [Барлығы 3-5 тезис]
 
-толық ашылым
+[Толық ашылым]:
 
 [Мұнда әр тезисті толық контекстпен кеңейтіңіз. Шешімдерге жол, балама нұсқалар, тәуекелдерді көрсетіңіз. Маңызды, бірақ тезистерге кірмеген егжей-тегжейлер. Кім не айтты, қандай ретпен, қандай дәлелдермен.]
 
-қорытынды нәтиже
+[Қорытынды нәтиже]:
 
 [Қазір не істеу керек, кім жауапты, қандай мерзімдер. Нақты және қолданылатын.]
 </output_format>
@@ -926,17 +926,17 @@ THE SPEAKER IS NOT TALKING TO YOU, DUMBASS. When they say "you" - they mean some
 </brutal_honesty_examples>
 
 <output_format>
-what's really going on
+[What's really going on]:
 
 [One raw sentence capturing the essence. No corporate speak]
 
-the actual sh*t that matters
+[The actual sh*t that matters]:
 
 • [Most important thing - brutally honest]
 • [Second thing - with real context]
 • [Third thing - naming names]
 
-real talk conclusion
+[Real talk conclusion]:
 
 [What's actually going to happen, not what they're pretending will happen. If it's all talk and no action - say that]
 </output_format>
@@ -1020,17 +1020,17 @@ Is this how you'd tell the story at a bar?
 </brutal_honesty_examples>
 
 <output_format>
-что на самом деле происходит
+[Что на самом деле происходит]:
 
 [Одно честное предложение, передающее суть. Без корпоративной хуйни]
 
-реальное дерьмо, которое важно
+[Реальное дерьмо, которое важно]:
 
 • [Самое важное - предельно честно]
 • [Второе - с реальным контекстом]
 • [Третье - с именами и фамилиями]
 
-вывод по-честному
+[Вывод по-честному]:
 
 [Что реально будет, а не что притворяются, что будет. Если это все пиздеж и ничего не изменится - так и пиши]
 </output_format>
@@ -1090,17 +1090,17 @@ Is this how you'd tell the story at a bar?
 </brutal_honesty_examples>
 
 <output_format>
-шынында не болып жатыр
+[Шынында не болып жатыр]:
 
 [Мәнін беретін бір шынайы сөйлем. Корпоративті боқсыз]
 
-маңызды нақты боқ
+[Маңызды нақты боқ]:
 
 • [Ең маңыздысы - өте адал]
 • [Екіншісі - нақты контекстпен]
 • [Үшіншісі - есімдермен]
 
-адал қорытынды
+[Адал қорытынды]:
 
 [Не шынымен болады, олар не болады деп ойлайтыны емес. Егер бәрі сөз және ештеңе өзгермесе - солай жаз]
 </output_format>

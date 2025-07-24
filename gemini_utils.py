@@ -1917,8 +1917,8 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
     """
     # Check if using GPT-4o Transcribe
     if model_id == "gpt-4o-transcribe":
-        from replicate_utils import gpt4o_transcribe_replicate
-        text = await gpt4o_transcribe_replicate(audio_file_path, language)
+        from replicate_utils import gpt4o_transcribe
+        text = await gpt4o_transcribe(audio_file_path, language)
         if text:
             return text
         # falls through to Gemini if None
