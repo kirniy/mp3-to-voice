@@ -1,7 +1,7 @@
 import aiofiles
 import os
 import logging
-from deepgram import Deepgram  # async SDK
+from deepgram import DeepgramClient, PrerecordedOptions
 
 log = logging.getLogger(__name__)
 DG_KEY = os.getenv("DEEPGRAM_API_KEY")
@@ -23,25 +23,34 @@ async def transcribe_nova3(audio_path: str, lang: str = "ru") -> str | None:
             log.error("DEEPGRAM_API_KEY missing")
             return None
 
-        dg = Deepgram(DG_KEY)
+        # Create client with v3 API
+        deepgram = DeepgramClient(DG_KEY)
         
         # Read binary into memory
         async with aiofiles.open(audio_path, "rb") as f:
             buf = await f.read()
 
-        source = {"buffer": buf, "mimetype": "audio/ogg"}  # KEEP mime for OGA!
-        opts = {
-            "model": "nova-3",          # use the newest model
-            "language": lang,           # e.g. 'ru'
-            "punctuate": "true",
-            "smart_format": "true"
-        }
+        # Configure transcription options for Nova-3
+        options = PrerecordedOptions(
+            model="nova-3",  # Using Nova-3!
+            language=lang,
+            punctuate=True,
+            smart_format=True
+        )
         
         log.info(f"Attempting Deepgram Nova-3 transcription for language: {lang}")
-        resp = await dg.transcription.prerecorded(source, opts)
+        
+        # Create file source
+        source = {"buffer": buf, "mimetype": "audio/ogg"}
+        
+        # Transcribe using the async client
+        response = await deepgram.listen.asyncprerecorded.v("v1").transcribe_file(
+            source,
+            options
+        )
         
         # Extract transcript from response
-        transcript = resp["results"]["channels"][0]["alternatives"][0]["transcript"]
+        transcript = response["results"]["channels"][0]["alternatives"][0]["transcript"]
         log.info(f"Deepgram transcription done ({len(transcript)} chars)")
         
         return transcript

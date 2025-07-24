@@ -59,7 +59,7 @@ MODELS = {
         "provider": "deepgram",
         "supports_audio": True,
         "supports_thinking": False,
-        "description": "Deepgram Nova-3 - Ultra-fast, high-accuracy transcription (~4-6s latency)",
+        "description": "Deepgram Nova-3 - Latest model, ultra-fast with superior accuracy",
         "model_name": "nova-3",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "DEEPGRAM_API_KEY"
