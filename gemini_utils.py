@@ -15,7 +15,7 @@ from model_config import (
     DEFAULT_DIRECT_MODEL, DEFAULT_TRANSCRIPTION_MODEL, DEFAULT_PROCESSING_MODEL,
     get_model_config, get_thinking_budget, is_model_suitable_for_task
 )
-from mode_prompts import MODE_PROMPTS
+from mode_prompts import MODE_PROMPTS, UNIVERSAL_RULE
 
 logger = logging.getLogger(__name__)
 
@@ -1464,11 +1464,11 @@ Is this how you'd tell the story at a bar?
                 else:
                     # For other modes, generate the summary based on the raw transcript
                     prompt_map = {
-                        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-                        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-                        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-                        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-                        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']), # Get prompt based on language, default to English
+                        "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+                        "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+                        "bullet": UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+                        "combined": UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+                        "pasha": UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']), # Get prompt based on language, default to English
                     }
                     
                     # Special handling for diagram mode - it doesn't use prompt templates
@@ -1806,11 +1806,11 @@ Start immediately with the first word of the recording.
     
     # Get the appropriate prompt
     prompt_map = {
-        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+        "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+        "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+        "bullet": UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+        "combined": UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+        "pasha": UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
     }
     
     summary_prompt = prompt_map.get(mode)
@@ -1885,11 +1885,11 @@ async def process_transcript_with_mode(
     
     # Get the appropriate prompt
     prompt_map = {
-        "brief": mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
-        "detailed": mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
-        "bullet": mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
-        "combined": mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
-        "pasha": mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
+        "brief": UNIVERSAL_RULE + mode_prompts['brief'].get(language, mode_prompts['brief']['en']),
+        "detailed": UNIVERSAL_RULE + mode_prompts['detailed'].get(language, mode_prompts['detailed']['en']),
+        "bullet": UNIVERSAL_RULE + mode_prompts['bullet'].get(language, mode_prompts['bullet']['en']),
+        "combined": UNIVERSAL_RULE + mode_prompts['combined'].get(language, mode_prompts['combined']['en']),
+        "pasha": UNIVERSAL_RULE + mode_prompts['pasha'].get(language, mode_prompts['pasha']['en']),
     }
     
     summary_prompt = prompt_map.get(mode)
@@ -1915,7 +1915,17 @@ async def _transcribe_audio_only(audio_file_path: str, language: str, model_id: 
     Returns:
         The raw transcript text or None on error.
     """
-    # Check if using GPT-4o Transcribe
+    # Check if using GPT-4o Transcribe via OpenAI
+    if model_id == "gpt-4o-openai":
+        from openai_utils import gpt4o_transcribe_openai
+        text = await gpt4o_transcribe_openai(audio_file_path, language)
+        if text:
+            return text
+        # falls through to Replicate if None
+        logger.warning("OpenAI transcription failed, falling back to Replicate")
+        model_id = "gpt-4o-transcribe"
+    
+    # Check if using GPT-4o Transcribe via Replicate
     if model_id == "gpt-4o-transcribe":
         from replicate_utils import gpt4o_transcribe
         text = await gpt4o_transcribe(audio_file_path, language)

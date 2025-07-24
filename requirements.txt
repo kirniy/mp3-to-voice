@@ -7,4 +7,5 @@ pytz
 ffmpeg-python # Optional, but recommended for broader format support
 Pillow # For fallback image generation
 replicate>=1.0.3 # For GPT-4o Transcribe integration via Replicate
+openai>=1.29.0 # For native OpenAI GPT-4o transcription
 aiofiles # For async file operations 

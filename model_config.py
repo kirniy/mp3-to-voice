@@ -33,12 +33,23 @@ MODELS = {
     
     # OpenAI models (audio transcription only)
     "gpt-4o-transcribe": {
-        "name": "GPT-4o Transcribe",
+        "name": "GPT-4o Transcribe (Replicate)",
+        "provider": "replicate",
+        "supports_audio": True,
+        "supports_thinking": False,
+        "description": "High-accuracy speech-to-text model using GPT-4o via Replicate",
+        "model_name": "gpt-4o-transcribe",
+        "transcription_only": True,  # Can only be used for transcription, not processing
+        "requires_api_key": "REPLICATE_API_TOKEN"
+    },
+    
+    "gpt-4o-openai": {
+        "name": "GPT-4o (OpenAI)",
         "provider": "openai",
         "supports_audio": True,
         "supports_thinking": False,
-        "description": "High-accuracy speech-to-text model using GPT-4o",
-        "model_name": "gpt-4o-transcribe",
+        "description": "Direct OpenAI GPT-4o transcription - fastest and most accurate",
+        "model_name": "gpt-4o",
         "transcription_only": True,  # Can only be used for transcription, not processing
         "requires_api_key": "OPENAI_API_KEY"
     }
@@ -75,7 +86,7 @@ DEFAULT_DIRECT_MODEL = "gemini-2.0-flash"         # For direct protocol
 # Model selection constraints
 MODEL_CONSTRAINTS = {
     # Which models can be used for transcription (audio input required)
-    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash", "gpt-4o-transcribe"],
+    "transcription": ["gemini-2.0-flash", "gemini-2.5-flash", "gpt-4o-transcribe", "gpt-4o-openai"],
     
     # Which models can be used for text processing (mode formatting)
     "text_processing": ["gemini-2.0-flash", "gemini-2.5-flash"],
